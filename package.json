@@ -21,8 +21,8 @@
     "lint:fix": "oxlint packages --fix",
     "knip": "knip --production",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
-    "publish-npm": "pnpm build && pnpm --filter ./packages/agent-dev-env-cli publish --no-git-checks --provenance --access public",
-    "publish-npm:canary": "pnpm build && pnpm --filter ./packages/agent-dev-env-cli publish --no-git-checks --provenance --access public --tag canary",
+    "publish-npm": "pnpm --filter ./packages/agent-dev-env-cli publish --no-git-checks --provenance --access public",
+    "publish-npm:canary": "pnpm --filter ./packages/agent-dev-env-cli publish --no-git-checks --provenance --access public --tag canary",
     "prepare": "husky || true"
   },
   "devDependencies": {

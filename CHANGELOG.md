@@ -13,6 +13,24 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Fixed
+
+- `run macos` no longer fails with `the specified VM "<image>" does not
+  exist` right after a first-time image pull. On current Tart versions
+  `tart pull` stages the image in the local OCI store under its full
+  registry reference (`ghcr.io/<owner>/<image>:latest`) — the bare short
+  name never appears in `tart list` — so the runner now detects the pulled
+  image by that stored reference and clones the working VM from it
+  (falling back to a local VM name when the image was imported locally,
+  and to the pull reference for an image that is not present yet).
+- The published npm package now ships the repo README. The package-root
+  `README.md` is a generated, gitignored file (copied from the repo root
+  by `copy-assets.mjs`), so publishing without a build step first — e.g.
+  a raw `pnpm publish` from a fresh checkout — produced a tarball with no
+  README. The CLI package's `prepublishOnly` hook now runs the build on
+  every publish, so any publish path ships `dist/`, the assets, and the
+  README.
+
 ## [0.1.0] - 2026-09-06
 
 ### Added

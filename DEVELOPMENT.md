@@ -100,8 +100,11 @@ repo checkout).
 
 ### Publish to npm
 
-`pnpm publish-npm` (root script) builds the CLI (`pnpm build`) and
-publishes `agent-dev-env` with `pnpm --filter
+`pnpm publish-npm` (root script) publishes `agent-dev-env` to npm. The
+CLI package's `prepublishOnly` hook builds first (runs
+`scripts/copy-assets.mjs`: tsc + esbuild bundles + assets + the
+generated package README — so a publish from a fresh checkout still
+ships everything, README included), and it then runs `pnpm --filter
 ./packages/agent-dev-env-cli publish --no-git-checks --provenance
 --access public`. The CI workflow runs it on `agent-dev-env-v*` tags —
 npm authenticates via OIDC Trusted Publishers (no token) and provenance

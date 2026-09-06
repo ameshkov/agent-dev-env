@@ -167,12 +167,14 @@ agent-dev-env/
 `dist/` is the npm package payload — `npm pack --dry-run` (from
 `packages/agent-dev-env-cli`) verifies it.
 
-`pnpm publish-npm` (root script) builds and publishes `agent-dev-env` to
-npm: it runs `pnpm build` and then `pnpm --filter
-./packages/agent-dev-env-cli publish --no-git-checks --provenance
---access public`. The CI workflow calls it on `agent-dev-env-v*` tags.
-`pnpm publish-npm:canary` is the same but with `--tag canary` — CI uses it
-on every push to `master` with a temporary
+`pnpm publish-npm` (root script) publishes `agent-dev-env` to npm: the
+package's `prepublishOnly` hook runs `scripts/copy-assets.mjs` (tsc +
+esbuild bundles + assets + the generated package README, so a publish
+from a fresh checkout still ships everything, README included), and then
+`pnpm --filter ./packages/agent-dev-env-cli publish --no-git-checks
+--provenance --access public`. The CI workflow calls it on
+`agent-dev-env-v*` tags. `pnpm publish-npm:canary` is the same but with
+`--tag canary` — CI uses it on every push to `master` with a temporary
 `<version>-canary.<run>.<sha>` version. Use the scripts everywhere; do
 not run a raw `npm publish` from `packages/agent-dev-env-cli`.
 
