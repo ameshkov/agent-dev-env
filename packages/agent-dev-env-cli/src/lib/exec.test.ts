@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { isAlive, killTree, sleep, spawnDetached } from './exec.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isAlive, killTree, run, sleep, spawnDetached, withTimeout } from './exec.js';
 
 // Node scripts that keep running until SIGKILL'd.
 const DAEMON = 'setInterval(() => {}, 1000)';
@@ -102,5 +102,121 @@ describe('killTree', () => {
     expect(await waitFor(() => !isAlive(parentPid))).toBe(true);
     const childToCheck = childPid;
     expect(await waitFor(() => childToCheck === undefined || !isAlive(childToCheck))).toBe(true);
+  });
+});
+
+/**
+ * A node script that writes its pid to the probe file and then loops
+ * forever, exiting 130 on SIGINT / 143 on SIGTERM (the default shell
+ * exit codes) so a forward test can assert the signal reached it.
+ */
+function signalProbeScript(probeFile: string): string {
+  return (
+    `const fs = require('node:fs');` +
+    `fs.writeFileSync(${JSON.stringify(probeFile)}, String(process.pid));` +
+    `process.on('SIGINT', () => process.exit(130));` +
+    `process.on('SIGTERM', () => process.exit(143));` +
+    DAEMON
+  );
+}
+
+describe('run signal forwarding', () => {
+  const probeFiles: string[] = [];
+
+  afterEach(async () => {
+    // Kill any child left behind by a failed wait (the probe holds the pid).
+    for (const file of probeFiles.splice(0)) {
+      let pid: number | undefined;
+      try {
+        pid = Number.parseInt(readFileSync(file, 'utf8').trim(), 10);
+      } catch {
+        pid = undefined;
+      }
+      if (pid !== undefined && isAlive(pid)) {
+        await killTree(pid, 'SIGKILL');
+      }
+    }
+  });
+
+  it('forwards the CLI SIGINT to the child (deploy/build cancel)', async () => {
+    const probeFile = join(tmpdir(), `agent-dev-env-run-sigint-${process.pid}.probe`);
+    probeFiles.push(probeFile);
+    const result = run(process.execPath, ['-e', signalProbeScript(probeFile)]);
+    expect(await waitFor(() => existsSync(probeFile))).toBe(true);
+    process.emit('SIGINT');
+    const res = await withTimeout(result, 5000, 'run() did not settle after SIGINT');
+    expect(res.code).toBe(130);
+  });
+
+  it('forwards the CLI SIGTERM to the child', async () => {
+    const probeFile = join(tmpdir(), `agent-dev-env-run-sigterm-${process.pid}.probe`);
+    probeFiles.push(probeFile);
+    const result = run(process.execPath, ['-e', signalProbeScript(probeFile)]);
+    expect(await waitFor(() => existsSync(probeFile))).toBe(true);
+    process.emit('SIGTERM');
+    const res = await withTimeout(result, 5000, 'run() did not settle after SIGTERM');
+    expect(res.code).toBe(143);
+  });
+});
+
+describe('run stream option', () => {
+  it('mirrors the child output to the CLI while still capturing it', async () => {
+    const writeSpy = vi.spyOn(process.stdout, 'write');
+    try {
+      const res = await run(process.execPath, ['-e', "console.log('streamed-line')"], {
+        stream: true,
+      });
+      expect(res.code).toBe(0);
+      expect(res.stdout).toContain('streamed-line');
+      expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('streamed-line'));
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it('captures without mirroring when stream is off', async () => {
+    const writeSpy = vi.spyOn(process.stdout, 'write');
+    try {
+      const res = await run(process.execPath, ['-e', "console.log('captured-line')"]);
+      expect(res.code).toBe(0);
+      expect(res.stdout).toContain('captured-line');
+      const mirrored = writeSpy.mock.calls.some((args) => {
+        return String(args[0]).includes('captured-line');
+      });
+      expect(mirrored).toBe(false);
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+});
+
+describe('run git hook environment', () => {
+  /** The git repo-scoped vars git exports for hooks (GIT_INDEX_FILE,
+   *  GIT_DIR, ...) must never reach spawned children — a child `git`
+   *  with an explicit `-C` would otherwise target the hook's repo. */
+  const HOOK_VARS = ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE'];
+
+  it('strips inherited git repo env vars from the child', async () => {
+    const saved: Record<string, string | undefined> = {};
+    for (const key of HOOK_VARS) {
+      saved[key] = process.env[key];
+      process.env[key] = 'should-not-leak';
+    }
+    try {
+      const res = await run(process.execPath, [
+        '-e',
+        "console.log(process.env.GIT_DIR ?? 'unset', process.env.GIT_INDEX_FILE ?? 'unset')",
+      ]);
+      expect(res.code).toBe(0);
+      expect(res.stdout.trim()).toBe('unset unset');
+    } finally {
+      for (const key of HOOK_VARS) {
+        if (saved[key] === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = saved[key];
+        }
+      }
+    }
   });
 });

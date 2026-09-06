@@ -24,6 +24,10 @@ export interface RunOptions {
   input?: string;
   /** Kill with SIGKILL when the command runs longer. */
   timeoutMs?: number;
+  /** Mirror the child's stdout/stderr to the CLI's own while still
+   *  capturing them (live progress for long-running commands —
+   *  packer build, tart push, oras push). */
+  stream?: boolean;
 }
 
 export interface RunResult {
@@ -33,7 +37,45 @@ export interface RunResult {
   signal?: NodeJS.Signals | null;
 }
 
+/** Git environment variables that git exports while running a hook (e.g.
+ *  the pre-commit hook receives `GIT_INDEX_FILE` and `GIT_DIR`). They
+ *  point at the *parent* repository, so leaving them in the child's
+ *  environment makes a child `git` call that selects its repo with `-C`
+ *  silently operate on the wrong repository (the fixture repos in
+ *  `git.test.ts` / `tag.test.ts` are reported dirty under the hook
+ *  environment). Every git call in the CLI passes its repo explicitly,
+ *  so the inherited values are always stripped. */
+const GIT_REPO_ENV_VARS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_CEILING_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_GRAFT_FILE',
+  'GIT_NAMESPACE',
+] as const;
+
+/** The child environment: process.env merged over the caller's overrides,
+ *  minus the git repo-scoped hook variables.
+ *
+ * @param overrides - The caller's env overrides (optional).
+ * @returns The env to pass to spawn.
+ */
+function childEnv(overrides?: Record<string, string | undefined>): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...overrides };
+  for (const key of GIT_REPO_ENV_VARS) {
+    delete env[key];
+  }
+  return env;
+}
+
 /** Spawns a command and waits for it to exit, capturing stdout/stderr.
+ *  The CLI's own SIGINT/SIGTERM are forwarded to the child so a Ctrl+C
+ *  during a long-running command (tart push, oras push, packer build)
+ *  stops the child too — without forwarding the child is orphaned and
+ *  keeps running after the CLI dies (the deploy/build cancel case).
  *
  * @param cmd - The command to run.
  * @param args - Command-line arguments.
@@ -49,8 +91,9 @@ export function run(
   return new Promise((resolve) => {
     const child = spawnChild(cmd, args, options);
     const output = { stdout: '', stderr: '' };
-    attachStdio(child, output);
+    attachStdio(child, output, options.stream === true);
     writeInput(child, options.input);
+    const removeForwarders = attachSignalForwarders(child);
 
     const timer =
       options.timeoutMs !== undefined ? armTimeout(child, options.timeoutMs) : undefined;
@@ -68,9 +111,11 @@ export function run(
     };
 
     child.on('error', (err) => {
+      removeForwarders();
       finish({ code: -1, stdout: output.stdout, stderr: err.message, signal: null });
     });
     child.on('close', (code, signal) => {
+      removeForwarders();
       finish({
         code: code ?? -1,
         stdout: output.stdout,
@@ -81,6 +126,30 @@ export function run(
   });
 }
 
+/** Forwards the parent's SIGINT/SIGTERM to the child (a Ctrl+C must stop
+ *  the spawned command, never orphan it) and returns the detach function.
+ *
+ * @param child - The spawned child.
+ * @returns The detach function (removes the signal listeners).
+ */
+function attachSignalForwarders(child: ChildProcessWithoutNullStreams): () => void {
+  const forward = (signal: NodeJS.Signals): void => {
+    try {
+      child.kill(signal);
+    } catch {
+      // already gone
+    }
+  };
+  const onSigint = (): void => forward('SIGINT');
+  const onSigterm = (): void => forward('SIGTERM');
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
+  return () => {
+    process.removeListener('SIGINT', onSigint);
+    process.removeListener('SIGTERM', onSigterm);
+  };
+}
+
 function spawnChild(
   cmd: string,
   args: string[],
@@ -88,7 +157,7 @@ function spawnChild(
 ): ChildProcessWithoutNullStreams {
   return spawn(cmd, args, {
     cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : process.env,
+    env: childEnv(options.env),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
@@ -96,14 +165,21 @@ function spawnChild(
 function attachStdio(
   child: ChildProcessWithoutNullStreams,
   output: { stdout: string; stderr: string },
+  stream: boolean,
 ): void {
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
   child.stdout.on('data', (d: string) => {
     output.stdout += d;
+    if (stream) {
+      process.stdout.write(d);
+    }
   });
   child.stderr.on('data', (d: string) => {
     output.stderr += d;
+    if (stream) {
+      process.stderr.write(d);
+    }
   });
 }
 
@@ -262,7 +338,7 @@ export function spawnDetached(
   const child = spawn(cmd, args, {
     detached: true,
     cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : process.env,
+    env: childEnv(options.env),
     stdio: logFd !== undefined ? ['ignore', logFd, logFd] : 'ignore',
   });
   // detached:true alone still keeps the parent's event loop alive until
