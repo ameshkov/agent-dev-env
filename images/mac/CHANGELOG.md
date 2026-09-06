@@ -14,42 +14,39 @@ is never removed — changes land there until the next release.
 
 ### Added
 
-- `agent-dev-env stop` (macos) — stops the sandbox: `tart stop` on the
-  working VM plus the host SSH agent / Docker bridge listeners the runner
-  leaves up (a bare `tart stop` left the socat listeners running). Honors
-  the runner's `SANDBOX_VM` / `SANDBOX_AGENT_PORT` / `SANDBOX_DOCKER_PORT`
-  overrides.
-- `agent-dev-env delete` (macos) — deletes the sandbox: stops it first
-  (delegating to the stop step), then `tart delete`s the working VM, and
-  the pristine image too with `--pristine` (or a `y` at the prompt). Asks
-  before deleting unless `--yes`.
-- `agent-dev-env run` (macos) now installs sandbox environment rules into
-  the guest's coding agents — opencode's global `AGENTS.md`
-  (`~/.config/opencode/AGENTS.md`) and the Copilot CLI's
-  `copilot-instructions.md` (`~/.copilot/copilot-instructions.md`) —
-  explaining the runtime topology: the Docker remote engine (context
-  `host`, published ports reachable at the NAT gateway, volume mounts
-  needing host paths), the shared-directory path mapping and the SSH agent
-  bridge. The content ships in the repo (`assets/rules/agent-rules.md`);
-  the actual work-dir and mount paths are substituted at install time and
-  the SSH agent section is included only when the bridge is up. The runner
-  asks before installing or updating the rules, and files the user
-  modified are replaced only after a confirmation that defaults to no.
+- Dev toolchain parity with the AdGuard build-agent-images mac recipe:
+  CMake, Ninja, Go, `rbenv`, `xcodegen`/`swiftlint`/`periphery`, `pnpm`
+  and `yarn`; Rust via rustup (pinned); Java via SDKMAN; Flutter pinned
+  to the base image's `$FLUTTER_HOME`; Gradle + Kotlin/Native pre-caches;
+  Android SDK extras; Git LFS, legacy `ssh-rsa` and the CocoaPods
+  `insteadOf` block; and an Xcode/simulator warm-up. The optional
+  toolchains are empty-by-default vars pinned in
+  `vars/sandbox-macos-tahoe.pkrvars.hcl`.
+- The image records its own identity inside the guest
+  (`~/.config/agent-dev-env/image.json`).
+- `agent-dev-env stop` / `agent-dev-env delete` (macos) — stop the
+  sandbox VM plus the host bridge listeners, and delete the working VM
+  (and the pristine image with `--pristine`).
+- `agent-dev-env run` (macos) now installs the sandbox environment rules
+  into the guest's coding agents (opencode `AGENTS.md`, Copilot CLI
+  `copilot-instructions.md`), with the work-dir and mount paths
+  substituted at install time.
 
 ### Changed
 
-- `agent-dev-env run` (macos) — the summary's stop hints now point at
-  `agent-dev-env stop` instead of a bare `tart stop` and a hand-written
-  `lsof | xargs kill` for the bridge listeners.
+- The base image is now `ghcr.io/cirruslabs/macos-tahoe-xcode:26.5`
+  (Xcode 26.5), the latest stable Xcode image for macOS Tahoe.
+- The run summary's stop hints point at `agent-dev-env stop` instead of a
+  bare `tart stop` and a hand-written `lsof | xargs kill`.
 
 ### Fixed
 
-- `agent-dev-env run` (macos) — the SSH agent and Docker bridges no
-  longer skip their setup when `tart ip` fails right after boot. Both
-  bridge setups derived the host gateway from a single `tart ip` call,
-  which can fail before the VM's IP is assigned; they now go through a
-  shared helper that retries the IP fetch (up to 5 attempts, 2 s apart)
-  before giving up.
+- The baked `image.json` now contains the interpolated image name /
+  `image_version` / Xcode version, not the literal `${var.*}` text (the
+  heredoc used a quoted delimiter).
+- The SSH agent and Docker bridge setups no longer skip when `tart ip`
+  fails right after boot — the IP is now retried (5 x 2 s) through a
+  shared helper.
 
 ## [mac-v1.6.0] - 2026-08-20
 

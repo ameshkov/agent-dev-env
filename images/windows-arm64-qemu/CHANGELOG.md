@@ -15,95 +15,63 @@ the next release.
 
 ### Added
 
-- `agent-dev-env stop` (windows-qemu) — stops the sandbox: qemu (via the
-  runner's `qemu.pid`) and swtpm, plus the host SSH agent / Docker bridge
-  listeners the runner leaves up. Honors the runner's
-  `SANDBOX_AGENT_PORT` / `SANDBOX_DOCKER_PORT` overrides.
-- `agent-dev-env delete` (windows-qemu) — deletes the sandbox: stops it
-  first (delegating to the stop step), then removes the state dir (working
-  disk overlay + TPM/EFI NVRAM + pulled image cache). Asks before deleting
-  unless `--yes`.
-- The virtual display is now a virtio-gpu-pci (virtio-gpu) instead of
-  ramfb at runtime: the image stages the ARM64 `viogpudo` (virtio-gpu
-  display-only) driver onto the unattend CD, so first logon lands it in
-  the driver store and the runtime VM's virtio-gpu-pci binds it.
-  Resizing the QEMU window now changes the guest's resolution
-  (`VIRTIO_GPU_EVENT_DISPLAY`) instead of only scaling the framebuffer.
-  The image build itself keeps ramfb (WinPE has no display driver).
+- Toolchain parity with the AdGuard build-agent-images Windows recipes:
+  Git LFS, Ninja, Temurin JDK 21 (machine `JAVA_HOME`, `bin` on PATH),
+  Conan, the VS2022 ATL component, long paths + Developer Mode registry
+  settings, `pnpm`/`yarn` npm globals, and the OpenChamber desktop app
+  (hash-pinned win-arm64 NSIS). Go, Rust (arm64 + MSVC targets), VS2022
+  Build Tools, WiX, protoc, NASM, LLVM, Vim, NuGet, MinGW-w64 and GNU
+  make came with v1.1.0.
+- The image records its own identity inside the guest
+  (`%USERPROFILE%\.config\agent-dev-env\image.json`).
+- `agent-dev-env stop` / `agent-dev-env delete` (windows-qemu) — stop
+  qemu + swtpm and the host bridge listeners, and delete the state dir.
+- The virtual display is now a virtio-gpu-pci at runtime: the ARM64
+  `viogpudo` driver is staged onto the unattend CD, so resizing the QEMU
+  window changes the guest resolution instead of only scaling the
+  framebuffer (the image build itself keeps ramfb).
 
 ### Changed
 
-- Node.js is bumped from 22 to 26 (`nodejs_version = "26.8.1"` in the
-  vars file, choco package `nodejs`).
-- The image was renamed from `sandbox-windows-11` to
-  `sandbox-windows-11-arm64-qemu` (vars file, template `vm_name` —
-  `sandbox-windows-<windows_version>-arm64-qemu.qcow2` — the GHCR package
-  name and the runner's `image_name`): the platform is now part of the
-  image name, matching the state-dir naming
-  (`~/Library/Application Support/agent-dev-env/windows-qemu/`).
-  Older releases stay published under the old name.
-- The QEMU runner (`agent-dev-env run`, windows-qemu) boots the guest
-  in a resizable window: it passes `-display cocoa,zoom-to-fit=on` (the
-  cocoa window is fixed-size otherwise) and replaced `-device ramfb` with
-  `-device virtio-gpu-pci`. Full screen is available from the QEMU
-  window's View menu → Enter Fullscreen.
-- The build flow (`agent-dev-env build`) — the EXIT trap no longer prints
-  `stop_watchdog: command not found` when the build aborts before the
-  watchdog function is defined (it now checks before calling it).
-- `agent-dev-env run` (windows-qemu) — the working VM is recreated
-  when the pristine image *changes*, not just when its path changes: the
-  backing marker now records path + size + mtime, and the stale overlay /
-  EFI NVRAM / TPM state are discarded (previously a rebuild that replaced
-  the file at the same path stacked the old overlay on the new base — a
-  corrupt disk that dropped Windows to the UEFI shell). The EFI NVRAM is
-  also seeded from the build output's `efivars.fd` when one exists, so
-  Windows' own Boot0000 is used instead of the empty edk2 template.
-- `agent-dev-env run` (windows-qemu) — the default working-VM state
-  dir now lives under the CLI's data root
-  (`~/Library/Application Support/agent-dev-env/windows-qemu/<image>/`):
-  the platform and image are part of the path, so state from different
-  platforms and images never collides. Override the data root with
-  `AGENT_DEV_ENV_DATA_HOME` (or `XDG_DATA_HOME`) as before.
-- `agent-dev-env run` (windows-qemu) — the summary's stop hints now
-  point at `agent-dev-env stop` instead of a bare
-  `kill $(cat …/qemu.pid)` and a hand-written `lsof | xargs kill` for the
-  bridge listeners.
+- Node.js is bumped from 22 to 26.
+- The image was renamed to `sandbox-windows-11-arm64-qemu` (the platform
+  is now part of the name; old releases stay published under the old
+  name).
+- The QEMU runner boots the guest in a resizable window (`-display
+  cocoa,zoom-to-fit=on` + virtio-gpu-pci).
+- The build flow's EXIT trap no longer errors with `stop_watchdog:
+  command not found` when a build aborts before the watchdog is defined.
+- `run` recreates the working VM when the pristine image *changes*
+  (path + size + mtime now recorded) and seeds the EFI NVRAM from the
+  build output; the working-VM state dir moved under the CLI's data
+  root.
+- Run summaries point at `agent-dev-env stop` instead of manual
+  `kill $(cat ...qemu.pid)` / `lsof | xargs kill` hints.
 
 ### Fixed
 
-- The runner's guest bridge setup no longer takes ~5 min per SSH command
-  on a guest whose bridges are already installed: the sshd channel does
-  not close when a PowerShell payload finishes (the guest-side relays
-  hold the console handles and keep trickling output, which resets
-  expect's idle timeout), so every `guest_ps` call used to end only at
-  an alarm (or never, before the hard alarm was added). Each remote
-  command now ends with a unique sentinel echoed by the guest's shell
-  after the payload exits, and expect kills the ssh client on it — step
-  5 finishes in seconds.
-- The image no longer depends on the Chocolatey bootstrapper persisting
-  the machine PATH: the Chocolatey provisioner adds
-  `C:\ProgramData\chocolatey\bin` to the Machine PATH itself and the
-  toolchain + VS provisioners call `choco.exe` by its full path — the
-  bootstrapper's compiled `Install-ChocolateyPath` can silently fail to
-  persist in the elevated WinRM context, so after the reboot the
-  re-read PATH still lacked the choco bin dir ('choco' not recognized).
-  `choco cleanup` in the final verification now redirects inside `cmd`
-  too, so PowerShell 5.1 never turns choco's stderr into a terminating
-  error under `$ErrorActionPreference='Stop'`.
-- The RemoteSigned bake-in no longer aborts the build (observed at the
-  OpenChamber provisioner): the build passes `-ExecutionPolicy Bypass`
-  at Process scope, so `Set-ExecutionPolicy -Scope LocalMachine`
-  emitted its "overridden by a more specific scope" notice, which
-  Windows PowerShell 5.1 under WinRM turned into a terminating error
-  even though the machine policy was updated. The provisioner now sets
-  the Process scope first (no override, no notice) and tolerates a
-  failed machine-policy set.
-- The image now bakes in machine-wide PowerShell `RemoteSigned` instead
-  of shipping Windows' default `Restricted` policy: `opencode` (an npm
-  shim — `opencode.ps1` in `%APPDATA%\npm`) refused to start in a
-  PowerShell session with "running scripts is disabled on this system".
-  The runners' runtime `Set-ExecutionPolicy` stays as a fallback for
-  images built before this change.
+- Node.js, gh, Git, Python, Go, the Temurin JDK, Firefox and Chrome are
+  now the official win-arm64 builds — the x64 (choco) ones ran emulated
+  and opencode's native session crashed with 0xC0000005 (the remaining
+  x64-only tools still run emulated by necessity).
+- The OpenChamber desktop provisioner: `-and` no longer mis-parses as a
+  parameter, the installer search walks every per-user/per-machine root
+  plus the uninstall registry, and the exe search polls for a few
+  seconds.
+- The choco `git-lfs` package is gone (Git bundles its own); the machine
+  PATH dedup no longer double-appends choco dirs; `ocr` is verified
+  pinned before the build finishes.
+- The JDK provisioner refreshes `$env:Path` from the registry; the
+  runner's guest bridge setup ends on a sentinel instead of a timeout.
+- The image no longer depends on the choco bootstrapper persisting the
+  machine PATH; PowerShell `RemoteSigned` is baked in without aborting
+  the build (the process-scope policy is set first).
+- Rebuild fixes: the Node/GH CLI zip extraction paths are correct, locked
+  installer temp files are retried (20 x 3 s) and waited for before
+  deletion, and the OpenChamber desktop NSIS installer retries up to 3
+  times on transient 0xC0000005 crashes.
+- The OpenChamber web UI logon task resolves the `openchamber` shim from
+  PATH instead of a hardcoded npm install dir.
 
 ## [windows-arm64-qemu-v1.1.0] - 2026-08-24
 

@@ -15,77 +15,47 @@ the next release.
 
 ### Added
 
-- **Host user settings sync into the Ubuntu guest** — the runner now copies
-  the host's user settings into the guest like the macOS sandbox does
-  (opencode config + auth, OpenCodeReview config, Copilot config + skills,
-  VS Code extensions + user config, mcp-compress-router settings, SSH
-  dotfiles, `.gitconfig`), once per VM, tracked by a versioned marker
-  (`~/.config/agent-dev-env/settings-copied`), with `--no-settings` to skip
-  and `agent-dev-env sync` (ubuntu-vmware) to re-sync on demand. The
-  shared logic is `settings/ubuntu.ts` + `settings/ubuntu-copy.ts` (ssh2
-  transport, host-to-guest path mapping for the VS Code user dir and
-  mcp-compress-router, `.gitconfig` rewritten for `/home/admin`,
-  OpenChamber restart). See `docs/ubuntu-vmware.md`.
+- Dev tooling: `ninja-build`, `git-lfs` (filters wired for root and the
+  sandbox user), `libicu-dev`, plus `pnpm` and `yarn` as nvm-global
+  package managers.
+- JVM/Android parity with the macOS image (same empty-by-default vars):
+  `rbenv`, OpenJDK 17 (`JAVA_HOME` via `/etc/profile.d`), Gradle 8.7 with
+  a wrapper pre-cache, and the Android SDK into `/opt/android-sdk` (NDK +
+  build-tools, licenses accepted). Kotlin/Native is not cached —
+  JetBrains publishes no linux-aarch64 tarballs.
+- The OpenChamber desktop app (hash-pinned linux-arm64 AppImage) with a
+  GNOME desktop entry.
+- The image records its own identity inside the guest
+  (`~/.config/agent-dev-env/image.json`).
+- Host user settings sync into the Ubuntu guest (opencode, Copilot,
+  VS Code, mcp-compress-router, SSH dotfiles, `.gitconfig`) once per VM,
+  marker-gated, plus `agent-dev-env sync` to re-apply on demand.
 
 ### Changed
 
-- Node.js is bumped from 22 to 26 (`node_version = "26"` in the vars
-  file): nvm installs Node 26 and sets it as the default.
+- Node.js is bumped from 22 to 26 (`node_version = "26"`).
 
 ### Fixed
 
-- **The shared host directory no longer fails when the share is
-  registered before VMware Tools are up** — `agent-dev-env run`
-  (ubuntu-vmware) called `vmrun addSharedFolder` as soon as sshd answered,
-  but open-vm-tools can still be starting then: `getGuestIPAddress`/sshd
-  were already up while the tools state vmrun needs for the HGFS
-  registration was not, so the runner logged `Error: The VMware Tools are
-  not running in the virtual machine` and `/mnt/hgfs/work` never appeared
-  in the guest. The runner now waits for `vmrun checkToolsState` to report
-  `running` (up to 5 min) and retries `addSharedFolder` a few times, then
-  warns only if it still failed. A share persisted by a previous run
-  (`Error: Already exists`) is treated as success.
-- **Host user settings copy no longer fails on the root-owned `~/.local`** —
-  the sync unpack hit `tar: Cannot utime` / `Permission denied` and aborted:
-  the image's `install -d -o admin -g admin
-  /home/admin/.local/share ...` left the *intermediate* `.local` directory
-  root-owned (install only applies `-o/-g` to its operands), so the sandbox
-  user could not write into `~/.local` or restore its timestamps during
-  `tar -C $HOME` extraction. `install -d` now lists `/home/admin/.local`
-  as its own operand, and the runner's settings copy
-  (`settings/ubuntu-copy.ts`) chowns `~/.local` back to the
-  sandbox user before unpacking (via `sudo -S` with the guest password the
-  runner already knows), so existing images are fixed on the next run
-  without a rebuild. The copy also strips macOS AppleDouble companions
-  (`._*`) and `.DS_Store` from the staged archive and cleans up any `._*`
-  junk a previous partial copy left in the guest — the AppleDouble files
-  were packed as ordinary files, and one of them (`._share`) is what first
-  made the extraction hit the root-owned directory.
-- **mcp-compress-router settings land where the router looks for them** —
-  the settings copy mapped the host's
-  `~/Library/Application Support/mcp-compress-router/` to
-  `~/.config/mcp-compress-router/`, but mcp-compress-router's
-  `defaultConfigDir` on Linux is the XDG **data** dir,
-  `~/.local/share/mcp-compress-router/` (a different path from macOS and
-  Windows), so the synced `mcp.json`/credentials were never picked up.
-  The mapping now targets `~/.local/share/mcp-compress-router/` (where
-  `mcp.json`/`.jsonc`, `credentials.json`, `tools-cache.json` and `.env`
-  all live), the settings version was bumped so already-provisioned
-  guests re-copy, and the unpack drops the stale `~/.config` copy.
-- **The build watchdog no longer misses the grub menu** — the Ubuntu build
-  can fail with "Timeout waiting for SSH" when the grub autoinstall
-  command is never typed: grub's menu countdown is ~20 s wide, but
-  `assets/watchdog/watch-build.py` polled once per ~2 min (90 s worker
-  timeout + 20 s sleep), so the menu default booted the interactive
-  Subiquity installer and the build sat on the installer's proxy screen
-  until SSH timed out. The supervisor now fast-polls (3 s interval — the
-  worker timeout stays at 90 s, since a kill mid-typing would corrupt the
-  grub shell input line) while the autoinstall command is untyped (no
-  `.boot-typed` marker), falling back to the old slow cadence once typed
-  or after a 4 min cap; the relaying is unchanged. The build flow's
-  watchdog stop also kills the supervisor's in-flight `--worker`
-  children (they survive a supervisor kill and keep the VNC port open,
-  blocking the next build).
+- The Java provisioner no longer clobbers `PATH` in login shells — `go`
+  and the Android `sdkmanager`/`platform-tools` stay on PATH (the
+  profile.d script kept a transient, unquoted `$PATH`).
+- The shared host directory no longer fails when registered before
+  VMware Tools are up — the runner waits for `checkToolsState` and
+  retries `addSharedFolder`.
+- The host settings copy survives the root-owned `~/.local` intermediate
+  dir (chowned back before unpacking) and strips macOS `._*` /
+  `.DS_Store` junk.
+- mcp-compress-router settings land in the XDG data dir
+  (`~/.local/share/mcp-compress-router/`), not `~/.config` — the old path
+  was never picked up.
+- The build watchdog no longer misses the grub menu: it fast-polls while
+  the autoinstall command is untyped and has an OCR-free blind typing
+  path, serialized with the OCR rescue.
+- The `python_version` var is now actually enforced by the template
+  (`python3.<minor>` installed, build fails on mismatch).
+- The Kotlin/Native pre-cache no longer fails the build — removed
+  (`kotlin_native_version` is empty; no linux-aarch64 artifacts upstream).
 
 ## [ubuntu-arm64-vmware-v1.1.0] - 2026-08-25
 
