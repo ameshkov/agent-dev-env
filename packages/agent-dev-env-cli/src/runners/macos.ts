@@ -18,6 +18,7 @@ import {
   cloneVm,
   deleteVm,
   dirArg,
+  listVms,
   pullImage,
   setVm,
   stopVm,
@@ -82,6 +83,46 @@ async function teardownWorkingVm(context: RunContext): Promise<void> {
 
 // --- step 1: image + working VM ---------------------------------------------
 
+/** Resolves the source for `tart clone`: the local VM name when the pristine
+ *  image was imported locally (older setups / Packer builds), otherwise the
+ *  OCI reference actually staged in `tart list` (matched by
+ *  `/<image>:latest` regardless of the owner — an already-pulled image is
+ *  reused and no GHCR owner is needed to detect it), falling back to the
+ *  pull reference for an image that is not present yet.
+ *
+ *  On current Tart versions, `tart pull` stages images in the local OCI
+ *  store under their full registry reference (`ghcr.io/<owner>/<image>:
+ *  latest`) — the bare short name never appears in `tart list`, and
+ *  `tart clone` only accepts a VM name or a full reference.
+ *
+ * @internal — exported for the co-located unit tests; production goes
+ * through cloneSource().
+ * @param vms - The parsed `tart list` map (name/ref → state).
+ * @param image - The pristine image name.
+ * @param owner - The GHCR owner (used only for the not-present fallback).
+ * @returns The source for `tart clone`.
+ */
+export function resolveCloneSource(vms: Map<string, string>, image: string, owner: string): string {
+  if (vms.has(image)) {
+    return image;
+  }
+  const staged = [...vms.keys()].find(
+    (name) => name.startsWith('ghcr.io/') && name.endsWith(`/${image}:latest`),
+  );
+  return staged ?? registryRef(image, 'latest', owner);
+}
+
+/** The clone source for the pristine image, resolved from the live
+ *  `tart list` state (see resolveCloneSource).
+ *
+ * @param context - The run context.
+ * @returns The source for `tart clone`.
+ */
+async function cloneSource(context: RunContext): Promise<string> {
+  const owner = await resolveOwner({ owner: context.options.owner, env: context.options.env });
+  return resolveCloneSource(await listVms(), context.image, owner);
+}
+
 async function ensureImageAndVm(context: RunContext, state: RunState): Promise<void> {
   const { instance, image } = context;
   const yes = context.options.yes;
@@ -90,7 +131,8 @@ async function ensureImageAndVm(context: RunContext, state: RunState): Promise<v
     logger.ok(`Working VM '${instance}' found (state: ${await vmState(instance)}).`);
     return;
   }
-  if (await vmExists(image)) {
+  let source = await cloneSource(context);
+  if (await vmExists(source)) {
     logger.info(`Sandbox image '${image}' is present.`);
   } else {
     logger.info(`Sandbox image '${image}' is not pulled on this machine.`);
@@ -98,14 +140,17 @@ async function ensureImageAndVm(context: RunContext, state: RunState): Promise<v
       logger.die("aborted — no sandbox image available. Run 'tart pull' manually when ready.");
     }
     await pullSandboxImage(context);
+    // `tart pull` stages the image under its OCI reference only — recompute
+    // the source so the clone uses it instead of the non-existent short name.
+    source = await cloneSource(context);
   }
-  if ((await vmState(image)) === 'running') {
-    logger.die(`image VM '${image}' is running — stop it first: tart stop ${image}`);
+  if ((await vmState(source)) === 'running') {
+    logger.die(`image VM '${source}' is running — stop it first: tart stop ${source}`);
   }
   const ask = `No working VM '${instance}' yet — clone it from the pristine image '${image}'?`;
   if (await confirmDefault(ask, { default: 'y', yes })) {
-    logger.cmd(`tart clone ${image} ${instance}`);
-    const res = await cloneVm(image, instance);
+    logger.cmd(`tart clone ${source} ${instance}`);
+    const res = await cloneVm(source, instance);
     if (res.code !== 0) {
       throw new Error(`tart clone failed:\n${res.stderr.trim()}`);
     }
@@ -114,7 +159,7 @@ async function ensureImageAndVm(context: RunContext, state: RunState): Promise<v
     logger.ok(`Cloned '${instance}' from '${image}'.`);
   } else {
     logger.die(
-      `aborted — '${instance}' is required. Clone it manually with 'tart clone ${image} ${instance}'.`,
+      `aborted — '${instance}' is required. Clone it manually with 'tart clone ${source} ${instance}'.`,
     );
   }
 }

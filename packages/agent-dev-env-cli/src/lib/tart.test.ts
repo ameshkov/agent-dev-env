@@ -8,19 +8,24 @@ import {
   tartSetArgs,
 } from './tart.js';
 
+// Real `tart list` output (Tart 2.32.x): columns are Source, Name, Disk,
+// Size, Accessed, State — local rows are keyed by the VM name, OCI rows
+// (images staged by `tart pull`) by the full registry reference.
 const LIST_OUTPUT = [
-  'Source Name Disk Used Access Time State',
-  'ghcr.io/ameshkov/sandbox-macos-tahoe:latest sandbox-macos-tahoe 160.0 50.0 Wed Aug 27 10:00:00 2025 stopped',
-  'sandbox-macos-tahoe sandbox-macos 160.0 45.0 Wed Aug 28 09:00:00 2025 running',
+  'Source Name Disk Size Accessed State',
+  'local  sandbox-macos-tahoe 160 102 3 days ago stopped',
+  'local  sandbox-macos 160 114 1 day ago running',
+  'OCI    ghcr.io/ameshkov/sandbox-macos-tahoe:latest 140 87 1 day ago stopped',
   '',
 ].join('\n');
 
 describe('parseTartList', () => {
-  it('maps names to the last-column state and skips the header', () => {
+  it('maps local names and OCI references to the last-column state', () => {
     const vms = parseTartList(LIST_OUTPUT);
     expect(vms.get('sandbox-macos-tahoe')).toBe('stopped');
     expect(vms.get('sandbox-macos')).toBe('running');
-    expect(vms.size).toBe(2);
+    expect(vms.get('ghcr.io/ameshkov/sandbox-macos-tahoe:latest')).toBe('stopped');
+    expect(vms.size).toBe(3);
   });
 
   it('returns an empty map for empty output', () => {
