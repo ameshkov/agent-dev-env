@@ -16,8 +16,9 @@ import type { RunOptions } from './options.js';
 export interface RunContext {
   platform: RunOptions['platform'];
   options: RunOptions;
-  /** Working VM name (SANDBOX_VM / default). */
-  vm: string;
+  /** The working sandbox instance name (SANDBOX_VM / default) — the
+   *  Tart VM name on macOS, the per-instance state key elsewhere. */
+  instance: string;
   /** Pristine image name (--image / SANDBOX_IMAGE / default). */
   image: string;
   /** Host work dir shared into the guest ('' disables the mount). */

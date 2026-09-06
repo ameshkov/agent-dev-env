@@ -74,12 +74,14 @@ describe('system builders (mac)', () => {
     expect(sshConfigBlock()).toContain('    IdentityAgent /tmp/ssh-agent.sock');
   });
 
-  it('appendBlockIfMissing is idempotent via the marker', () => {
+  it('appendBlockIfMissing keeps the original content and is idempotent', () => {
     const block = zprofileAgentBlock();
     const marker = '# SSH agent bridge to the host (see docs/ssh-agent.md)';
-    const once = appendBlockIfMissing('export A=1\n', block, marker);
-    const twice = appendBlockIfMissing(once, block, marker);
+    const original = 'export A=1\n';
+    const once = appendBlockIfMissing(original, block, marker);
+    expect(once).toContain('export A=1');
     expect(once).toContain(marker);
+    const twice = appendBlockIfMissing(once, block, marker);
     expect(twice).toBe(once);
   });
 

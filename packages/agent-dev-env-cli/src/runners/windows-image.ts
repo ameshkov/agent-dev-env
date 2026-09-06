@@ -12,8 +12,8 @@ import { ensureVmwareImage, vmwareWorkingVmx } from './vmware-image.js';
 const PLATFORM = 'windows-vmware' as const;
 
 /** The working clone's vmx. */
-export function windowsWorkingVmx(image: string): string {
-  return vmwareWorkingVmx(PLATFORM, image);
+export function windowsWorkingVmx(image: string, instance: string): string {
+  return vmwareWorkingVmx(PLATFORM, image, instance);
 }
 
 /** Step 1: select the archive, extract the base, clone the working VM

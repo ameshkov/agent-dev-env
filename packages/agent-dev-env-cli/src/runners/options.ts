@@ -24,7 +24,8 @@ export interface RunFlags {
 export interface RunOptions {
   platform: Platform;
   image: string;
-  vm: string;
+  /** The working sandbox instance name (SANDBOX_VM / default). */
+  instance: string;
   workDir: string;
   mountName: string;
   agentPort: number;
@@ -52,6 +53,35 @@ export interface RunOptions {
   home: string;
 }
 
+/** The default sandbox instance name (when SANDBOX_VM is unset). */
+const DEFAULT_INSTANCE = 'default-agent-dev-env';
+
+/** Instance names are path segments + Tart VM names — restrict them to
+ *  strict kebab-case so they can never escape the state dirs or collide
+ *  with the image names.
+ * @internal
+ */
+export function validateInstance(name: string): void {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+    throw new Error(
+      `invalid SANDBOX_VM '${name}' (expected kebab-case: lowercase letters, digits, dashes)`,
+    );
+  }
+}
+
+/** Resolves the working sandbox instance name.
+ *
+ * @param env - Environment (SANDBOX_VM).
+ * @returns The instance name (SANDBOX_VM or 'default-agent-dev-env').
+ * @throws Error on an invalid SANDBOX_VM value.
+ */
+export function resolveInstance(env: Record<string, string | undefined> = process.env): string {
+  const raw = env.SANDBOX_VM?.trim() ?? '';
+  const instance = raw === '' ? DEFAULT_INSTANCE : raw;
+  validateInstance(instance);
+  return instance;
+}
+
 /** @internal — port env override validation (1-65535). */
 export function parsePortEnv(value: string, name: string): number {
   const port = Number(value);
@@ -73,7 +103,7 @@ function parseIntEnv(value: string, name: string, def: number): number {
  * @param env - Environment (defaults to process.env).
  * @param home - Host home directory (defaults to os.homedir()).
  * @returns The resolved options.
- * @throws Error on an invalid port override.
+ * @throws Error on an invalid port override or SANDBOX_VM value.
  */
 export function resolveRunOptions(
   platform: Platform,
@@ -86,7 +116,7 @@ export function resolveRunOptions(
   return {
     platform,
     image: flags.image ?? env.SANDBOX_IMAGE ?? defs.image,
-    vm: env.SANDBOX_VM ?? defs.vmName,
+    instance: resolveInstance(env),
     workDir: workDirFlag ?? defs.workDir ?? '',
     mountName: env.SANDBOX_MOUNT_NAME ?? defs.mountName ?? 'dev',
     agentPort: parsePortEnv(env.SANDBOX_AGENT_PORT ?? String(defs.agentPort), 'SANDBOX_AGENT_PORT'),

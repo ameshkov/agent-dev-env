@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { profileDScript, systemdUnit, type SystemdBridge } from './systemd.js';
-import { removeProfileBlock } from './index.js';
+import { envBlockTargets, removeProfileBlock } from './index.js';
 
 const BRIDGE: SystemdBridge = {
   unitName: 'agent-dev-env-ssh-agent.service',
@@ -34,6 +34,26 @@ describe('systemd builders (ubuntu)', () => {
     expect(script).toContain('export SSH_AUTH_SOCK=/tmp/ssh-agent.sock');
     expect(script).toContain('export DOCKER_HOST=unix:///tmp/docker.sock');
     expect(script).toContain('export TESTCONTAINERS_HOST_OVERRIDE=192.168.24.1');
+  });
+});
+
+describe('envBlockTargets', () => {
+  it('lands in profile.d and the sudo caller bashrc when root', () => {
+    expect(envBlockTargets(true, '/root', 'admin')).toEqual([
+      '/etc/profile.d/agent-dev-env.sh',
+      '/home/admin/.bashrc',
+    ]);
+  });
+
+  it('lands in profile.d only when root without a sudo caller', () => {
+    expect(envBlockTargets(true, '/root')).toEqual(['/etc/profile.d/agent-dev-env.sh']);
+  });
+
+  it('lands in the user profile and bashrc when not root', () => {
+    expect(envBlockTargets(false, '/home/admin')).toEqual([
+      '/home/admin/.profile',
+      '/home/admin/.bashrc',
+    ]);
   });
 });
 

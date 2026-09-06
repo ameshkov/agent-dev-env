@@ -8,7 +8,9 @@
 // management (pidfiles, stale-process kills, the pgrep fallback). Port of
 // run-windows-qemu-sandbox.sh §step 2/3/4 helpers + the stop script.
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { commandExists, isAlive, readPidFile, run, sleep, spawnDetached } from './exec.js';
 import { logger } from './logger.js';
@@ -31,7 +33,8 @@ export const QEMU_EFI_VARS_TEMPLATE = '/opt/homebrew/share/qemu/edk2-arm-vars.fd
 
 // --- state paths -------------------------------------------------------------
 
-/** <data>/windows-qemu/<image> — the per-image state root.
+/** <data>/windows-qemu/<image> — the per-image state root (shared across
+ *  instances: pristine cache + working/<instance> state dirs).
  * @param image - The image name.
  * @returns The state root.
  */
@@ -48,56 +51,62 @@ export function qemuImagePath(image: string): string {
   return join(qemuStateDir(image), 'image', `${image}.qcow2`);
 }
 
-/** <data>/windows-qemu/<image>/working — the working VM state dir
- *  (overlay, efivars.fd, tpm/, pidfiles, sockets).
+/** <data>/windows-qemu/<image>/working/<instance> — one instance's working
+ *  VM state dir (overlay, efivars.fd, tpm/, pidfiles, sockets).
  * @param image - The image name.
- * @returns The working dir.
+ * @param instance - The instance name.
+ * @returns The instance's working dir.
  */
-export function qemuWorkingDir(image: string): string {
-  return join(qemuStateDir(image), 'working');
+export function qemuWorkingDir(image: string, instance: string): string {
+  return join(qemuStateDir(image), 'working', instance);
 }
 
-/** <data>/windows-qemu/<image>/working/<image>.qcow2 — the COW overlay
- *  the running VM writes to.
+/** <data>/windows-qemu/<image>/working/<instance>/<image>.qcow2 — the COW
+ *  overlay the running VM writes to.
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The overlay path.
  */
-export function qemuOverlayPath(image: string): string {
-  return join(qemuWorkingDir(image), `${image}.qcow2`);
+export function qemuOverlayPath(image: string, instance: string): string {
+  return join(qemuWorkingDir(image, instance), `${image}.qcow2`);
 }
 
 /** The backing-image identity marker (path|size|mtime of the pristine
  *  disk the overlay was created from).
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The marker path.
  */
-export function qemuBackingMarker(image: string): string {
-  return join(qemuWorkingDir(image), 'backing-image.txt');
+export function qemuBackingMarker(image: string, instance: string): string {
+  return join(qemuWorkingDir(image, instance), 'backing-image.txt');
 }
 
 /** The working VM's persistent EFI NVRAM store.
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The efivars.fd path.
  */
-export function qemuEfivarsPath(image: string): string {
-  return join(qemuWorkingDir(image), 'efivars.fd');
+export function qemuEfivarsPath(image: string, instance: string): string {
+  return join(qemuWorkingDir(image, instance), 'efivars.fd');
 }
 
 /** The working VM's TPM state dir (Windows 11 needs TPM 2.0 and its
  *  credentials must survive reboots).
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The tpm dir.
  */
-export function qemuTpmDir(image: string): string {
-  return join(qemuWorkingDir(image), 'tpm');
+export function qemuTpmDir(image: string, instance: string): string {
+  return join(qemuWorkingDir(image, instance), 'tpm');
 }
 
 /** The qemu pidfile the runner writes.
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The qemu.pid path.
  */
-export function qemuPidFile(image: string): string {
-  return join(qemuWorkingDir(image), 'qemu.pid');
+export function qemuPidFile(image: string, instance: string): string {
+  return join(qemuWorkingDir(image, instance), 'qemu.pid');
 }
 
 /** The swtpm pidfile (swtpm --pid writes it after daemonizing).
@@ -105,33 +114,50 @@ export function qemuPidFile(image: string): string {
  * @internal — test-only export; production callers go through
  * startSwtpm/stopSwtpm, which read this pidfile themselves.
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The swtpm.pid path.
  */
-export function swtpmPidFile(image: string): string {
-  return join(qemuWorkingDir(image), 'swtpm.pid');
+export function swtpmPidFile(image: string, instance: string): string {
+  return join(qemuWorkingDir(image, instance), 'swtpm.pid');
 }
 
 /** The swtpm control socket qemu connects its chardev to.
+ *
+ *  The socket lives under the system temp dir, NOT next to the working
+ *  state: swtpm limits the Unix control socket path to ~107 chars
+ *  (sockaddr_un sun_path), and the per-instance state path
+ *  (<data>/windows-qemu/<image>/working/<instance>/swtpm.sock) exceeds
+ *  it on macOS (~129 chars — swtpm exits with "Path for UnioIO socket is
+ *  too long"). The socket is ephemeral (the TPM STATE persists in the
+ *  working dir); the key hashes image+instance so instances never share
+ *  a socket, and the uid is prefixed so host users cannot collide in the
+ *  shared /tmp.
+ *
  * @param image - The image name.
- * @returns The swtpm.sock path.
+ * @param instance - The instance name.
+ * @returns The swtpm.sock path (short, under the system temp dir).
  */
-export function swtpmSockPath(image: string): string {
-  return join(qemuWorkingDir(image), 'swtpm.sock');
+export function swtpmSockPath(image: string, instance: string): string {
+  const key = createHash('sha1').update(`${image}/${instance}`).digest('hex').slice(0, 12);
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 'u';
+  return join(tmpdir(), `ade-sw-tpm-${uid}-${key}.sock`);
 }
 
 /** The swtpm log (level=20), next to the socket.
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The swtpm.log path.
  */
-function swtpmLogPath(image: string): string {
-  return join(qemuWorkingDir(image), 'swtpm.log');
+function swtpmLogPath(image: string, instance: string): string {
+  return join(qemuWorkingDir(image, instance), 'swtpm.log');
 }
 
 /** The qemu log (the running VM's stdout/stderr).
+ * @param instance - The instance name.
  * @returns The log path under the CLI's log dir.
  */
-export function qemuLogPath(): string {
-  return join(paths.logs, 'qemu-windows-11.log');
+export function qemuLogPath(instance: string): string {
+  return join(paths.logs, `qemu-windows-11-${instance}.log`);
 }
 
 /** The pristine-disk identity (path|size|mtime; the same scheme as
@@ -282,10 +308,11 @@ async function killWait(label: string, pid: number): Promise<boolean> {
  *  overlay-path pgrep fallback — the path is unique to this sandbox).
  *
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns True when qemu is running.
  */
-export function isQemuAlive(image: string): boolean {
-  const pid = readPidFile(qemuPidFile(image));
+export function isQemuAlive(image: string, instance: string): boolean {
+  const pid = readPidFile(qemuPidFile(image, instance));
   if (pid !== undefined) {
     return isAlive(pid);
   }
@@ -295,10 +322,11 @@ export function isQemuAlive(image: string): boolean {
 /** @internal — runner-launched qemu pids by overlay path command line
  *  (a pidfile-less qemu from a crashed run).
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The pids, in pgrep order.
  */
-async function findQemuPids(image: string): Promise<number[]> {
-  const res = await run('pgrep', ['-f', `qemu-system-aarch64.*${qemuStateDir(image)}`]);
+async function findQemuPids(image: string, instance: string): Promise<number[]> {
+  const res = await run('pgrep', ['-f', `qemu-system-aarch64.*${qemuWorkingDir(image, instance)}`]);
   if (res.code !== 0) {
     return [];
   }
@@ -312,9 +340,10 @@ async function findQemuPids(image: string): Promise<number[]> {
  *  script's stop_qemu. Idempotent.
  *
  * @param image - The image name.
+ * @param instance - The instance name.
  */
-export async function stopQemu(image: string): Promise<void> {
-  const pidfile = qemuPidFile(image);
+export async function stopQemu(image: string, instance: string): Promise<void> {
+  const pidfile = qemuPidFile(image, instance);
   const pid = readPidFile(pidfile);
   if (pid !== undefined) {
     if (isAlive(pid)) {
@@ -325,7 +354,7 @@ export async function stopQemu(image: string): Promise<void> {
     logger.info(`qemu (pid ${pid}) is not running — removing the stale pidfile.`);
     rmSync(pidfile, { force: true });
   }
-  const pids = await findQemuPids(image);
+  const pids = await findQemuPids(image, instance);
   if (pids.length === 0) {
     logger.info('qemu is not running — nothing to stop.');
     return;
@@ -342,9 +371,10 @@ export async function stopQemu(image: string): Promise<void> {
  *  run) and removes the stale pidfile + socket. Idempotent.
  *
  * @param image - The image name.
+ * @param instance - The instance name.
  */
-export async function stopSwtpm(image: string): Promise<void> {
-  const pidfile = swtpmPidFile(image);
+export async function stopSwtpm(image: string, instance: string): Promise<void> {
+  const pidfile = swtpmPidFile(image, instance);
   const pid = readPidFile(pidfile);
   if (pid !== undefined) {
     if (isAlive(pid)) {
@@ -356,7 +386,7 @@ export async function stopSwtpm(image: string): Promise<void> {
     logger.info(`No swtpm pidfile (${pidfile}) — nothing to stop.`);
   }
   rmSync(pidfile, { force: true });
-  rmSync(swtpmSockPath(image), { force: true });
+  rmSync(swtpmSockPath(image, instance), { force: true });
 }
 
 /** Starts swtpm (TPM 2.0; the state must persist for the credentials
@@ -364,12 +394,13 @@ export async function stopSwtpm(image: string): Promise<void> {
  *  holds a lock on the TPM state dir — kill it first like the shell.
  *
  * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The daemonized swtpm pid.
  */
-export async function startSwtpm(image: string): Promise<number> {
-  const sock = swtpmSockPath(image);
-  const pidfile = swtpmPidFile(image);
-  const tpm = qemuTpmDir(image);
+export async function startSwtpm(image: string, instance: string): Promise<number> {
+  const sock = swtpmSockPath(image, instance);
+  const pidfile = swtpmPidFile(image, instance);
+  const tpm = qemuTpmDir(image, instance);
   const old = readPidFile(pidfile);
   if (old !== undefined && isAlive(old)) {
     logger.warn(`stale swtpm (pid ${old}) still running — stopping it.`);
@@ -392,7 +423,7 @@ export async function startSwtpm(image: string): Promise<number> {
     '--ctrl',
     `type=unixio,path=${sock}`,
     '--log',
-    `file=${swtpmLogPath(image)},level=20`,
+    `file=${swtpmLogPath(image, instance)},level=20`,
     '--pid',
     `file=${pidfile}`,
     '--tpm2',
@@ -405,7 +436,7 @@ export async function startSwtpm(image: string): Promise<number> {
     await sleep(1000);
   }
   if (!existsSync(sock)) {
-    logger.die(`swtpm socket ${sock} did not appear (see ${swtpmLogPath(image)}).`);
+    logger.die(`swtpm socket ${sock} did not appear (see ${swtpmLogPath(image, instance)}).`);
   }
   const pid = readPidFile(pidfile) ?? -1;
   logger.ok(`swtpm is up (pid ${pid}).`);
@@ -416,15 +447,16 @@ export async function startSwtpm(image: string): Promise<number> {
  *  gets stdout+stderr) and records the pidfile for stop/status.
  *
  * @param image - The image name.
+ * @param instance - The instance name.
  * @param args - The qemu-system-aarch64 arguments (buildQemuArgs).
  * @returns The qemu pid.
  */
-export async function launchQemu(image: string, args: string[]): Promise<number> {
-  const logDir = dirname(qemuLogPath());
+export async function launchQemu(image: string, instance: string, args: string[]): Promise<number> {
+  const logDir = dirname(qemuLogPath(instance));
   mkdirSync(logDir, { recursive: true });
   logger.cmd(`qemu-system-aarch64 ${args.join(' ')}`);
-  logger.info(`Running the VM in the background (output: ${qemuLogPath()}).`);
-  const pid = spawnDetached('qemu-system-aarch64', args, { logFile: qemuLogPath() });
-  writeFileSync(qemuPidFile(image), `${pid}\n`);
+  logger.info(`Running the VM in the background (output: ${qemuLogPath(instance)}).`);
+  const pid = spawnDetached('qemu-system-aarch64', args, { logFile: qemuLogPath(instance) });
+  writeFileSync(qemuPidFile(image, instance), `${pid}\n`);
   return pid;
 }

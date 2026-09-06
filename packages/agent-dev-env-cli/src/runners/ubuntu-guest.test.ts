@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { guestCredentials, parseGuestStatus } from './ubuntu-guest.js';
+import {
+  findGuestNode,
+  guestCredentials,
+  nodeFromProbe,
+  parseGuestStatus,
+} from './ubuntu-guest.js';
+import type { SshSession } from '../lib/ssh.js';
 
 const VARS = {
   ssh_username: 'admin',
@@ -44,3 +50,71 @@ describe('parseGuestStatus', () => {
     expect(parseGuestStatus('everything else')).toEqual({});
   });
 });
+
+describe('nodeFromProbe', () => {
+  it('returns the absolute node path from a successful probe', () => {
+    expect(
+      nodeFromProbe({ code: 0, stdout: '/home/admin/.nvm/versions/node/v26.12.0/bin/node\n' }),
+    ).toBe('/home/admin/.nvm/versions/node/v26.12.0/bin/node');
+  });
+
+  it('takes the last line when the probe printed several', () => {
+    expect(
+      nodeFromProbe({
+        code: 0,
+        stdout: '/usr/bin/node\n/home/admin/.nvm/versions/node/v26.12.0/bin/node\n',
+      }),
+    ).toBe('/home/admin/.nvm/versions/node/v26.12.0/bin/node');
+  });
+
+  it('returns undefined when the probe failed or printed nothing', () => {
+    expect(nodeFromProbe({ code: 1, stdout: '' })).toBeUndefined();
+    expect(nodeFromProbe({ code: 0, stdout: '' })).toBeUndefined();
+    expect(nodeFromProbe({ code: 0, stdout: 'node not found\n' })).toBeUndefined();
+  });
+});
+
+describe('findGuestNode', () => {
+  it('tries the probes in order and returns the first node found', async () => {
+    const probed: string[] = [];
+    const session = fakeSession((command) => {
+      probed.push(command);
+      if (command === 'bash -ic "command -v node"') {
+        return { code: 0, stdout: '/home/admin/.nvm/versions/node/v26.12.0/bin/node\n' };
+      }
+      return { code: 1, stdout: '' };
+    });
+    const node = await findGuestNode(session);
+    expect(node).toBe('/home/admin/.nvm/versions/node/v26.12.0/bin/node');
+    expect(probed.length).toBe(1);
+  });
+
+  it('falls back to the nvm install dir when a login shell misses node', async () => {
+    const session = fakeSession((command) => {
+      if (command.includes('nvm/versions/node')) {
+        return { code: 0, stdout: '/home/admin/.nvm/versions/node/v26.12.0/bin/node\n' };
+      }
+      return { code: 1, stdout: '' };
+    });
+    const node = await findGuestNode(session);
+    expect(node).toBe('/home/admin/.nvm/versions/node/v26.12.0/bin/node');
+  });
+
+  it('returns undefined when no probe finds a node', async () => {
+    const session = fakeSession(() => ({ code: 1, stdout: '' }));
+    expect(await findGuestNode(session)).toBeUndefined();
+  });
+});
+
+/** A minimal fake session driving the probe commands (exec only).
+ *
+ * @param onExec - The per-command exec handler.
+ * @returns The session.
+ */
+function fakeSession(onExec: (command: string) => { code: number; stdout: string }): SshSession {
+  return {
+    exec: (command: string) => Promise.resolve({ ...onExec(command), stderr: '' }),
+    sftpWrite: () => Promise.resolve(),
+    end: () => undefined,
+  };
+}

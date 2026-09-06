@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { paths } from './paths.js';
@@ -34,15 +36,32 @@ describe('backingIdentity', () => {
 describe('qemu state paths', () => {
   it('derives the working-VM paths under <data>/windows-qemu/<image>', () => {
     const root = join(paths.data, 'windows-qemu', 'i');
+    const instance = 'default-agent-dev-env';
+    const working = join(root, 'working', instance);
     expect(qemuStateDir('i')).toBe(root);
     expect(qemuImagePath('i')).toBe(join(root, 'image', 'i.qcow2'));
-    expect(qemuOverlayPath('i')).toBe(join(root, 'working', 'i.qcow2'));
-    expect(qemuBackingMarker('i')).toBe(join(root, 'working', 'backing-image.txt'));
-    expect(qemuEfivarsPath('i')).toBe(join(root, 'working', 'efivars.fd'));
-    expect(qemuTpmDir('i')).toBe(join(root, 'working', 'tpm'));
-    expect(qemuPidFile('i')).toBe(join(root, 'working', 'qemu.pid'));
-    expect(swtpmPidFile('i')).toBe(join(root, 'working', 'swtpm.pid'));
-    expect(swtpmSockPath('i')).toBe(join(root, 'working', 'swtpm.sock'));
+    expect(qemuOverlayPath('i', instance)).toBe(join(working, 'i.qcow2'));
+    expect(qemuBackingMarker('i', instance)).toBe(join(working, 'backing-image.txt'));
+    expect(qemuEfivarsPath('i', instance)).toBe(join(working, 'efivars.fd'));
+    expect(qemuTpmDir('i', instance)).toBe(join(working, 'tpm'));
+    expect(qemuPidFile('i', instance)).toBe(join(working, 'qemu.pid'));
+    expect(swtpmPidFile('i', instance)).toBe(join(working, 'swtpm.pid'));
+    // The control socket must NOT live next to the (long) state paths:
+    // swtpm rejects Unix socket paths over ~107 chars (sockaddr_un), and
+    // the per-instance state path exceeds it on macOS. The socket is a
+    // short per-image+instance key under the system temp dir.
+    const key = createHash('sha1').update('i/default-agent-dev-env').digest('hex').slice(0, 12);
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 'u';
+    const sock = swtpmSockPath('i', instance);
+    expect(sock).toBe(join(tmpdir(), `ade-sw-tpm-${uid}-${key}.sock`));
+    expect(sock.length).toBeLessThan(107);
+  });
+
+  it('keys the working paths by instance', () => {
+    const root = join(paths.data, 'windows-qemu', 'i');
+    expect(qemuOverlayPath('i', 'ci')).toBe(join(root, 'working', 'ci', 'i.qcow2'));
+    expect(qemuPidFile('i', 'ci')).toBe(join(root, 'working', 'ci', 'qemu.pid'));
+    expect(qemuImagePath('i')).toBe(join(root, 'image', 'i.qcow2'));
   });
 });
 

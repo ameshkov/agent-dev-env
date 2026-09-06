@@ -81,10 +81,19 @@ files and have no such directory.
 | Windows 11 Pro (ARM64) | Unactivated (watermark); generic Pro key used for Setup |
 | VirtIO drivers | viostor/vioscsi, NetKVM, viogpudo (virtio-gpu display — drives the runtime VM's virtio-gpu-pci) from the unattend CD; vioserial, balloon + qemu guest agent from virtio-win guest tools |
 | Chocolatey | Community package manager (versions pinned in the vars file) |
-| Node.js, Python, Git, gh, ripgrep, jq, curl | Choco packages (versions from the vars file) |
-| Go, Vim, NuGet, make, MinGW-w64 | Choco packages (versions from the vars file) |
+| Node.js | Official win-arm64 zip from nodejs.org (version + SHA256 in the vars file) — native ARM64, no x64 emulation |
+| Google Chrome | Official Windows ARM64 enterprise MSI (SHA256 in the vars file; the URL is Google's live channel — refresh the hash on Chrome releases) |
+| Firefox | Official win64-aarch64 installer (version + SHA256 in the vars file) — native ARM64 |
+| Python, Git, gh | Official win-arm64 builds (version + SHA256 in the vars file) — native ARM64 |
+| ripgrep, jq, curl | Choco packages (no win-arm64 builds; run emulated) |
+| Ninja, Git LFS | Ninja choco package (version from the vars file); Git LFS is bundled with Git for Windows, filters wired |
+| pnpm, yarn | npm globals alongside the Node toolchain |
+| Go | Official win-arm64 toolchain (`go<version>.windows-arm64.zip`, SHA256-pinned) — `go build` produces arm64 output |
+| Vim, NuGet, make, MinGW-w64 | Choco packages (no win-arm64 builds; run emulated) |
 | Rust | Via rustup (arm64 host toolchain + MSVC targets for x86_64/i686/aarch64), `rust`/`cargo` on PATH |
-| VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), CMake, Windows 11 SDK |
+| JDK (Temurin) | Official Adoptium win-aarch64 zip machine `JAVA_HOME` + `bin` on PATH, verified `jni.h`/`jvm.lib` (JDK, not a JRE) — Gradle/Android/package:jni ready |
+| Conan | C/C++ dependency manager, current release via pip |
+| VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), ATL, CMake, Windows 11 SDK |
 | WiX, protoc, NASM, LLVM | Choco packages (versions from the vars file) |
 | Visual Studio Code | Native arm64 build, latest stable, direct download; `code` on PATH |
 | Google Chrome | Chrome for Testing snapshot, hash-pinned (see the vars file); x64, runs under Prism emulation |
@@ -92,8 +101,11 @@ files and have no such directory.
 | OpenCode (`opencode-ai`) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
 | OpenChamber web UI | npm global (`@openchamber/web`), native service on `0.0.0.0:4000` |
+| OpenChamber desktop app | win-arm64 NSIS installer, hash-pinned (see the vars file); Start Menu shortcut |
+| Long paths + Developer Mode | Registry (`LongPathsEnabled`, `AllowDevelopmentWithoutDevLicense`) + `git config --system core.longpaths` |
 | OpenSSH Server + RDP | Enabled; Administrator/sandbox1 (see the vars file) |
 | Docker CLI | Client only (`docker` + `docker compose`), remote engine via the host bridge |
+| Image identity | `%USERPROFILE%\.config\agent-dev-env\image.json` (image name + `image_version`, baked at build time) |
 | Bridge tooling | Node relays (in-image `node.exe`, written by the runner) for the SSH-agent/Docker bridges — the host side is the CLI's own forwarder (no socat) |
 
 ## Versioning
@@ -126,10 +138,13 @@ tag via `npx agent-dev-env tag <image>`.
   (pure emulation) and is unusably slow; HVF only virtualizes ARM64.
 - **virtio-win ≥ 0.1.240** is required for ARM64 driver builds; older
   releases fail at the driver-staging step.
-- **No shared folder.** The virtio-fs driver has no ARM64 Windows build
-  (virtio-win issue #1337), so there is no host-directory mount like the
-  macOS image's shared `dev` volume — use git, RDP clipboard, or the
-  OpenChamber web UI instead.
+- **No shared folder.** A host-directory mount needs the virtio-fs device,
+  which fails on both sides of this ARM64 guest + Apple Silicon host pair:
+  the guest side requires the ARM64 `viofs` driver, which virtio-win does
+  not build (issue #1337 — the ARM64 drivers we stage are storage/network
+  only), and the host side is served by `virtiofsd`, a Linux-only FUSE
+  daemon. The legacy 9p device has no Windows driver at all. Use git, RDP
+  clipboard, or the OpenChamber web UI to move code instead.
 - **Unactivated Windows.** The image runs indefinitely with a desktop
   watermark; personalization (wallpaper) is locked.
 - **`qemuargs` replaces, not appends.** Any change that needs extra qemu

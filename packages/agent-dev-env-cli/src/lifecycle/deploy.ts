@@ -75,7 +75,13 @@ async function deployMacos(image: CatalogImage, owner: string): Promise<void> {
   const ref = registryRef(image.name, version, owner);
   logger.title(`Pushing image: ${image.name}`);
   logger.info(`Registry: ${ref} and :latest`);
-  await runChecked('tart', tartPushArgs(image.name, ref, registryRef(image.name, 'latest', owner)));
+  await runChecked(
+    'tart',
+    tartPushArgs(image.name, ref, registryRef(image.name, 'latest', owner)),
+    {
+      stream: true,
+    },
+  );
   logger.ok(`Done: ${ref} (and :latest)`);
 }
 
@@ -115,6 +121,7 @@ async function deployQemu(image: CatalogImage, owner: string): Promise<void> {
     orasPushArgs(ref, `${image.name}.qcow2`, 'application/vnd.agent-dev-env.qcow2'),
     {
       cwd: dirs.output,
+      stream: true,
     },
   );
   logger.ok(`Done: ${registryRef(image.name, version, owner)} (and :latest)`);
@@ -166,6 +173,7 @@ async function deployVmware(image: CatalogImage, owner: string): Promise<void> {
     orasPushArgs(ref, `${image.name}.tar.gz`, 'application/vnd.agent-dev-env.vmware-vm'),
     {
       cwd: dirs.output,
+      stream: true,
     },
   );
   logger.ok(`Done: ${registryRef(image.name, version, owner)} (and :latest)`);

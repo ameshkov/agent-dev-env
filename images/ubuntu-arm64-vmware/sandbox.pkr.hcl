@@ -77,9 +77,10 @@ variable "ssh_password" {
 #
 # Pinned by direct download (like the Windows image's Chrome CfT approach):
 # the URL and SHA256 of each artifact are in the vars file; apt-installed
-# tools (gcc, git, python3, ...) come from the Ubuntu archive. Node.js is
-# installed via nvm (like the macOS image) and Rust via rustup (like the
-# Windows image), so only the major/minor version is pinned here.
+# tools (gcc, git, ...) come from the Ubuntu archive, with Python pinned to
+# the archive's python3.<minor> package. Node.js is installed via nvm (like
+# the macOS image) and Rust via rustup (like the Windows image), so only
+# the major/minor version is pinned here.
 
 variable "node_version" {
   type        = string
@@ -88,7 +89,7 @@ variable "node_version" {
 
 variable "python_version" {
   type        = string
-  description = "Python version from the Ubuntu archive that is installed, e.g. '3.12' (informational — apt resolves the exact version)."
+  description = "Python major.minor pinned to the Ubuntu archive package python3.<minor>, e.g. '3.12' (apt resolves the exact patch)."
 }
 
 variable "github_cli_version" {
@@ -104,6 +105,54 @@ variable "github_cli_sha256" {
 variable "open_code_review_version" {
   type        = string
   description = "open-code-review (ocr) version installed via npm."
+}
+
+# Optional toolchains. Empty (or an empty list) skips the tool; the
+# non-empty values live in the image's vars file — same pattern as the
+# macOS template (Java via SDKMAN there, OpenJDK from the Ubuntu archive
+# here). The Linux guest has no pre-installed Android SDK (unlike the
+# Cirrus macOS base), so the SDK itself is bootstrapped below.
+
+variable "java_version" {
+  type        = string
+  default     = ""
+  description = "OpenJDK major version from the Ubuntu archive to install, e.g. \"17\"; JAVA_HOME exported via /etc/profile.d. Empty = skip."
+}
+
+variable "gradle_version" {
+  type        = string
+  default     = ""
+  description = "Gradle version to install and pre-cache the wrapper distribution for, e.g. \"8.7\" (bin zip from services.gradle.org). Empty = skip."
+}
+
+variable "gradle_sha256" {
+  type        = string
+  default     = ""
+  description = "SHA256 of the gradle-<version>-bin.zip for gradle_version."
+}
+
+variable "kotlin_native_version" {
+  type        = string
+  default     = ""
+  description = "Kotlin/Native version to pre-cache for linux-aarch64 (under the sandbox user's ~/.konan). Empty = skip."
+}
+
+variable "android_cmdline_tools_version" {
+  type        = string
+  default     = ""
+  description = "Android command-line tools version, e.g. \"14742923\" (commandlinetools-linux-<version>_latest.zip). Used when android_sdk_packages is non-empty."
+}
+
+variable "android_cmdline_tools_sha256" {
+  type        = string
+  default     = ""
+  description = "SHA256 of the commandlinetools-linux zip for android_cmdline_tools_version."
+}
+
+variable "android_sdk_packages" {
+  type        = list(string)
+  default     = []
+  description = "Android SDK packages to install via sdkmanager, e.g. [\"ndk;29.0.14206865\", \"build-tools;34.0.0\"]. Empty = no Android SDK."
 }
 
 variable "go_version" {
@@ -203,6 +252,16 @@ variable "openchamber_port" {
   type        = number
   default     = 4000
   description = "TCP port the OpenChamber web UI listens on inside the guest."
+}
+
+variable "openchamber_desktop_version" {
+  type        = string
+  description = "OpenChamber desktop app version, e.g. \"1.22.0\" (linux-arm64 AppImage from the GitHub releases)."
+}
+
+variable "openchamber_desktop_sha256" {
+  type        = string
+  description = "SHA256 of the OpenChamber-<version>-linux-arm64.AppImage for openchamber_desktop_version."
 }
 
 # ---------------------------------------------------------------------------
@@ -371,11 +430,12 @@ build {
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -y
       apt-get install -y --no-install-recommends \
-        build-essential pkg-config make cmake autoconf automake \
+        build-essential pkg-config make cmake ninja-build autoconf automake \
         git curl wget jq ripgrep vim tmux unzip zip xz-utils \
+        git-lfs libicu-dev \
         ca-certificates openssl gnupg \
-        python3 python3-pip python3-venv python3-dev \
-        ruby ruby-dev \
+        python${var.python_version} python3-pip python3-venv python3-dev \
+        ruby ruby-dev rbenv \
         socat \
         libfuse2t64 libfuse3-3 \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
@@ -383,8 +443,18 @@ build {
         libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2 \
         libgtk-3-0t64 libdbus-glib-1-2 libglib2.0-0
       # apt's nodejs/npm are ancient on 24.04 — Node comes via nvm below.
+      # The pinned python3.<minor> package is what apt resolves; the assert
+      # fails the build loudly if `python3` has drifted from the var.
       python3 --version
+      python3 -c "import sys; assert '%d.%d' % sys.version_info[:2] == '${var.python_version}', 'python3 is not ${var.python_version}'"
       git --version
+      # Wire git-lfs filters into both root and the sandbox user's global
+      # git config (`git lfs install` writes ~/.gitconfig of the invoking
+      # user; the script runs as root, so the sandbox user needs its own).
+      git lfs install || true
+      sudo -H -u ${var.ssh_username} git lfs install || true
+      git lfs version
+      ninja --version
       echo "apt toolchain ready"
       END
     ]
@@ -500,6 +570,134 @@ GDM
       '
       echo 'export PATH=$PATH:$HOME/.cargo/bin' | tee /etc/profile.d/agent-dev-env-rust.sh
       echo "rust ready"
+      END
+    ]
+  }
+
+  # ===== Java — OpenJDK from the Ubuntu archive (opt-in) =====
+  # Same role as the mac image's SDKMAN Java, but plain archive OpenJDK: one
+  # apt package, no version manager. JAVA_HOME is derived from the real
+  # install path (not a hardcoded variant suffix) and exported system-wide
+  # for every login shell. Gradle/Android/Kotlin provisioners below depend
+  # on it.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{.Path}}'"
+    inline = [<<-END
+      set -e -x
+      if [ -z '${var.java_version}' ]; then echo 'Skipping Java'; exit 0; fi
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -y
+      apt-get install -y openjdk-${var.java_version}-jdk
+      JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")
+      cat > /etc/profile.d/agent-dev-env-java.sh <<JAVA
+export JAVA_HOME="$JAVA_HOME"
+export PATH="\$JAVA_HOME/bin:\$PATH"
+JAVA
+      java -version 2>&1
+      echo "java ready"
+      END
+    ]
+  }
+
+  # ===== Gradle — pinned bin zip + wrapper pre-cache (opt-in) =====
+  # Direct download like Go/VS Code (no Gradle in the Ubuntu archive that is
+  # usable for modern builds): the bin zip into /opt/gradle, the wrapper
+  # pre-cache as the sandbox user so the cached distributions land in the
+  # user's ~/.gradle (a root-owned cache would be useless for the agent).
+  # The scratch project is thrown away; `gradle wrapper` + `./gradlew help`
+  # leave the wrapper *-all distribution cached for the pinned version.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{.Path}}'"
+    inline = [<<-END
+      set -e -x
+      if [ -z '${var.gradle_version}' ]; then echo 'Skipping Gradle'; exit 0; fi
+      if ! command -v java >/dev/null 2>&1; then echo "WARN: gradle needs java_version; skipping"; exit 0; fi
+      cd /tmp
+      ZIP="gradle-${var.gradle_version}-bin.zip"
+      curl -fsSL -o "$ZIP" "https://services.gradle.org/distributions/$ZIP"
+      echo "${var.gradle_sha256}  $ZIP" | sha256sum -c -
+      rm -rf /opt/gradle
+      mkdir -p /opt/gradle
+      unzip -q "$ZIP" -d /opt/gradle
+      rm -f "$ZIP"
+      ln -sf /opt/gradle/gradle-${var.gradle_version}/bin/gradle /usr/local/bin/gradle
+      sudo -H -u ${var.ssh_username} bash -c '
+        set -e
+        export JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")
+        export PATH="$JAVA_HOME/bin:/usr/local/bin:$PATH"
+        tmpdir=$(mktemp -d)
+        cd "$tmpdir"
+        gradle init --type basic --dsl kotlin --project-name warmup --no-daemon -q >/dev/null 2>&1 || true
+        gradle wrapper --gradle-version ${var.gradle_version} --distribution-type all --no-daemon -q
+        ./gradlew help --no-daemon -q
+        cd /
+        rm -rf "$tmpdir"
+      '
+      gradle --version | head -2
+      echo "gradle ready"
+      END
+    ]
+  }
+
+  # ===== Kotlin/Native pre-cache (opt-in, currently skipped) =====
+  # The vars file keeps kotlin_native_version empty: JetBrains publishes
+  # prebuilt Kotlin/Native tarballs only for macOS (x86_64/aarch64) and
+  # Linux x86_64 — the linux-aarch64 URL 404s for every version (verified
+  # 2026-09-02, releases/1.9.24/linux-aarch64/...), so the pre-cache can
+  # never download. The provisioner stays (guarded by -z, below) so a
+  # future upstream distro can be enabled from the vars file alone. The
+  # URL is built at runtime with $$ (HCL renders it to $) because the
+  # version is a bash variable inside the sudo'd snippet.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{.Path}}'"
+    inline = [<<-END
+      set -e -x
+      if [ -z '${var.kotlin_native_version}' ]; then echo 'Skipping Kotlin/Native pre-cache (no linux-aarch64 prebuilt upstream)'; exit 0; fi
+      sudo -H -u ${var.ssh_username} bash -c '
+        set -e
+        KN_VERSION="${var.kotlin_native_version}"
+        KN_URL="https://download.jetbrains.com/kotlin/native/builds/releases/$${KN_VERSION}/linux-aarch64/kotlin-native-prebuilt-linux-aarch64-$${KN_VERSION}.tar.gz"
+        mkdir -p "$HOME/.konan"
+        curl -fsSL "$${KN_URL}" | tar -xz -C "$HOME/.konan/"
+        echo "Kotlin/Native $${KN_VERSION} cached at ~/.konan"
+      '
+      echo "kotlin/native ready"
+      END
+    ]
+  }
+
+  # ===== Android SDK — bootstrap + packages (opt-in) =====
+  # The Linux guest has no pre-installed SDK (unlike the Cirrus macOS base
+  # image), so the SDK is bootstrapped first: cmdline-tools (hash-pinned
+  # zip) into /opt/android-sdk, licenses accepted, then the packages pinned
+  # in android_sdk_packages (NDK, build-tools, ...). The profile.d exports
+  # make sdkmanager/adb available in every login shell.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{.Path}}'"
+    inline = [<<-END
+      set -e -x
+      if [ '${length(var.android_sdk_packages)}' -eq '0' ]; then echo 'Skipping Android SDK'; exit 0; fi
+      export ANDROID_HOME=/opt/android-sdk
+      export ANDROID_SDK_ROOT=$ANDROID_HOME
+      cd /tmp
+      ZIP="commandlinetools-linux-${var.android_cmdline_tools_version}_latest.zip"
+      curl -fsSL -o "$ZIP" "https://dl.google.com/android/repository/$ZIP"
+      echo "${var.android_cmdline_tools_sha256}  $ZIP" | sha256sum -c -
+      rm -rf "$ANDROID_HOME" /tmp/android-cmdline-tools
+      mkdir -p "$ANDROID_HOME/cmdline-tools"
+      unzip -q "$ZIP" -d /tmp/android-cmdline-tools
+      mv /tmp/android-cmdline-tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+      rm -f "$ZIP" && rm -rf /tmp/android-cmdline-tools
+      export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+      yes | sdkmanager --licenses >/dev/null 2>&1 || true
+      yes | sdkmanager ${join(" ", [for p in var.android_sdk_packages : "\"${p}\""])}
+      cat > /etc/profile.d/agent-dev-env-android.sh <<'ANDROID'
+export ANDROID_HOME=/opt/android-sdk
+export ANDROID_SDK_ROOT=$ANDROID_HOME
+export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+ANDROID
+      test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+      echo "Android SDK packages installed"
       END
     ]
   }
@@ -635,8 +833,13 @@ GDM
         opencode --version
         npm install -g @alibaba-group/open-code-review@${var.open_code_review_version}
         npm install -g @openchamber/web
+        # Package managers for frontend/Node projects (the mac image ships
+        # them as nvm globals too).
+        npm install -g pnpm yarn
         ocr --version
         openchamber --version
+        pnpm --version
+        yarn --version
       '
       OPENCODE_BIN="$ADMIN_HOME/.opencode/bin/opencode"
       ADMIN_HOME=$(sudo -H -u ${var.ssh_username} bash -c 'printf %s "$HOME"')
@@ -681,6 +884,41 @@ EOF
         systemctl --user daemon-reload
         systemctl --user enable --now agent-dev-env-openchamber
       '
+      END
+    ]
+  }
+
+  # ===== OpenChamber desktop app (linux-arm64 AppImage) =====
+  # Parity with the mac image's openchamber cask: the desktop app for the
+  # GNOME session (pair it with the web UI service via
+  # `openchamber connect-url --port 4000 --server http://127.0.0.1:4000`,
+  # see docs/ubuntu-vmware.md). The AppImage runs on the libfuse2 installed
+  # above; if FUSE is unavailable it can be executed with
+  # --appimage-extract-and-run.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{.Path}}'"
+    inline = [<<-END
+      set -e -x
+      cd /tmp
+      APP="OpenChamber-${var.openchamber_desktop_version}-linux-arm64.AppImage"
+      curl -fsSL -o "$APP" "https://github.com/openchamber/openchamber/releases/download/v${var.openchamber_desktop_version}/$APP"
+      echo "${var.openchamber_desktop_sha256}  $APP" | sha256sum -c -
+      rm -rf /opt/openchamber
+      mkdir -p /opt/openchamber
+      install -m 755 -o root -g root "$APP" /opt/openchamber/OpenChamber.AppImage
+      rm -f "$APP"
+      ln -sf /opt/openchamber/OpenChamber.AppImage /usr/local/bin/openchamber-desktop
+      cat > /usr/share/applications/openchamber.desktop <<'DESKTOP'
+[Desktop Entry]
+Name=OpenChamber
+Comment=AI coding agent workspace
+Exec=openchamber-desktop %U
+Terminal=false
+Type=Application
+Categories=Development;
+DESKTOP
+      test -x /opt/openchamber/OpenChamber.AppImage
+      echo "openchamber desktop ready"
       END
     ]
   }
@@ -742,21 +980,33 @@ EOF
         nvm use default >/dev/null
         node --version
         npm --version
+        pnpm --version
+        yarn --version
         opencode --version | head -n1
         ocr --version
         openchamber --version | head -n1
       '
       python3 --version
       git --version
+      git lfs version
       gh --version
       rg --version
       jq --version
+      ninja --version
+      rbenv --version
       /usr/local/go/bin/go version
       sudo -H -u ${var.ssh_username} bash -c '. "$HOME/.cargo/env"; rustc --version; cargo --version'
       code --version | head -n1
       docker --version
       docker compose version
       docker buildx version
+      # Optional toolchains — verified only when pinned in the vars file (a
+      # bare `packer build` without a vars file skips them).
+      if [ -n '${var.java_version}' ]; then java -version 2>&1 | head -1; fi
+      if [ -n '${var.gradle_version}' ]; then gradle --version | head -2; fi
+      if [ -n '${var.kotlin_native_version}' ]; then sudo -H -u ${var.ssh_username} bash -c 'test -d ~/.konan && echo "Kotlin/Native: precached in ~/.konan"'; fi
+      if [ '${length(var.android_sdk_packages)}' -gt '0' ]; then test -x /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager && echo "Android SDK ready"; fi
+      test -x /opt/openchamber/OpenChamber.AppImage
       # check-and-warn: a missing helper must never fail the build
       for tool in firefox; do
         if command -v "$tool" >/dev/null 2>&1; then
@@ -769,6 +1019,31 @@ EOF
         export XDG_RUNTIME_DIR="/run/user/$(id -u)"
         systemctl --user list-unit-files | grep agent-dev-env-openchamber || true
         docker context ls | grep host || true
+      '
+      END
+    ]
+  }
+
+  # Image identity — the image records its own name/version inside the
+  # guest (~/.config/agent-dev-env/image.json, the green-field guest
+  # marker dir), so any clone of it can answer "which image am I" without
+  # host-side provenance records. Written through sudo -H so the file
+  # lands in the sandbox user's home, owned by it.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{.Path}}'"
+    inline = [<<-END
+      set -e -x
+      sudo -H -u ${var.ssh_username} bash -c '
+        mkdir -p "$HOME/.config/agent-dev-env"
+        cat > "$HOME/.config/agent-dev-env/image.json" <<JSON
+        {
+          "image": "sandbox-ubuntu-${var.ubuntu_version}-arm64-vmware",
+          "image_version": "${var.image_version}",
+          "platform": "ubuntu-vmware",
+          "ubuntu_version": "${var.ubuntu_version}"
+        }
+JSON
+        cat "$HOME/.config/agent-dev-env/image.json"
       '
       END
     ]

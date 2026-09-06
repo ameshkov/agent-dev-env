@@ -3,14 +3,16 @@
 // the guest-IP + sshd waits and the one-time auto-logon
 // (windows-autologon.ts), the HGFS-share step (windows-shared.ts — skipped
 // for ARM guests), the NAT-segment bridges + guest agent over the
-// PowerShell transport (windows-bridges.ts / windows-guest.ts), and the
-// summary. Port of run-windows-vmware-sandbox.sh §steps 0-6.
+// PowerShell transport (windows-bridges.ts / windows-guest.ts), the user
+// settings copy (settings/windows-copy.ts) and the summary. Port of
+// run-windows-vmware-sandbox.sh §steps 0-6.
 
 import { rmSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
-import { imageRootDir } from '../lib/paths.js';
-import { waitForSshd } from '../lib/ssh.js';
+import { instanceDir } from '../lib/paths.js';
+import { openSshSession, waitForSshd } from '../lib/ssh.js';
 import { startVm } from '../lib/vmrun.js';
+import { ensureUserSettings, restartOpenchamber } from '../settings/windows-copy.js';
 import type { RunContext, RunState, SandboxBackend } from './framework.js';
 import { ensureBridgeDir } from './bridges.js';
 import { offerOpenInBrowser, waitForOpenchamber } from './openchamber.js';
@@ -48,9 +50,9 @@ async function preflight(context: RunContext): Promise<void> {
   requireVmrun();
   ensureBridgeDir();
   if (context.options.reset) {
-    const root = imageRootDir(PLATFORM, context.image);
+    const root = instanceDir(PLATFORM, context.image, context.instance);
     logger.info(
-      `Resetting the working VM (--reset) — deleting the extracted base and the working clone.`,
+      `Resetting the working VM (--reset) — deleting the working instance '${context.instance}'.`,
     );
     rmSync(root, { recursive: true, force: true });
   }
@@ -59,7 +61,7 @@ async function preflight(context: RunContext): Promise<void> {
 // --- step 2: boot -----------------------------------------------------------
 
 async function boot(context: RunContext, state: RunState): Promise<void> {
-  const workVmx = windowsWorkingVmx(context.image);
+  const workVmx = windowsWorkingVmx(context.image, context.instance);
   await stopRunningVm(context, workVmx, PLATFORM);
   logger.cmd(`vmrun -T fusion start ${workVmx} ${context.options.headless ? 'nogui' : 'gui'}`);
   const start = await startVm(workVmx, context.options.headless ? 'nogui' : 'gui');
@@ -86,8 +88,34 @@ async function boot(context: RunContext, state: RunState): Promise<void> {
 // --- step 4/5 hooks ---------------------------------------------------------
 
 async function setupSettings(context: RunContext, state: RunState): Promise<void> {
-  logger.info('Windows guests have no user settings copy — skipping.');
-  state.settings = 'skipped';
+  if (context.options.noSettings) {
+    logger.info('Skipping user settings copy (--no-settings).');
+    state.settings = 'skipped';
+    return;
+  }
+  if (!state.vmIp) {
+    logger.warn('no guest IP — skipping the user settings copy.');
+    state.settings = 'failed';
+    return;
+  }
+  const creds = resolveGuestCredentials(context.image, context.options.env, state.vmIp);
+  const session = await openSshSession(creds);
+  try {
+    state.settings = await ensureUserSettings(
+      session,
+      context.options.home,
+      context.options.yes,
+      creds.username,
+    );
+    if (state.settings === 'copied') {
+      await restartOpenchamber(session);
+    }
+  } catch (err) {
+    state.settings = 'failed';
+    logger.warn(`settings copy failed: ${(err as Error).message}`);
+  } finally {
+    session.end();
+  }
 }
 
 async function verifyOpenchamber(context: RunContext, state: RunState): Promise<void> {
@@ -108,7 +136,7 @@ async function finish(context: RunContext, state: RunState): Promise<void> {
   if (!context.options.foreground) {
     return;
   }
-  await waitForForegroundVmStop(windowsWorkingVmx(context.image));
+  await waitForForegroundVmStop(windowsWorkingVmx(context.image, context.instance));
   // The VM stopped (or Cmd+C was pressed) — kill the bridges this run
   // started; in background mode they stay up, outliving the CLI by design.
   await cleanupRunBridge(state.bridges.agent.pid, 'agent bridge');

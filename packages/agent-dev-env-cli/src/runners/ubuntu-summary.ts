@@ -5,7 +5,8 @@
 
 import { existsSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
-import { imageRootDir, workingVmxPath } from '../lib/paths.js';
+import { instanceDir, workingVmxPath } from '../lib/paths.js';
+import { cloneSourceLine } from '../lib/provenance.js';
 import type { RunContext, RunState } from './framework.js';
 import { resolveGuestCredentials } from './ubuntu-guest.js';
 
@@ -16,11 +17,12 @@ import { resolveGuestCredentials } from './ubuntu-guest.js';
  * @param state - The accumulated run state.
  */
 export async function printUbuntuSummary(context: RunContext, state: RunState): Promise<void> {
-  const workVmx = workingVmxPath(context.platform, context.image);
-  const stateDir = imageRootDir(context.platform, context.image);
+  const workVmx = workingVmxPath(context.platform, context.image, context.instance);
+  const stateDir = instanceDir(context.platform, context.image, context.instance);
 
   logger.step('Sandbox is ready');
   summaryLine('Image:', state.imageArchive ?? 'not available');
+  summaryLine('Image source:', cloneSourceLine('ubuntu-vmware', context.image, context.instance));
   summaryLine('VM:', workVmx);
   summaryLine('Guest IP:', state.vmIp ? `${state.vmIp} (Fusion NAT, vmnet8)` : 'unavailable');
   const creds = state.vmIp
@@ -39,7 +41,7 @@ export async function printUbuntuSummary(context: RunContext, state: RunState): 
   printRulesLine(state.rules);
   printSettingsLine(state.settings);
   printOpenchamberLine(context, state);
-  summaryLine('State:', `${stateDir} (extracted base + working clone; --reset re-clones)`);
+  summaryLine('State:', `${stateDir} (working instance; --reset re-clones)`);
   printStopLines(context, state);
 }
 

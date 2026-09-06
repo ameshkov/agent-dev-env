@@ -167,21 +167,27 @@ export function stageSanitizedGitconfig(home: string, staging: string): boolean 
   }
 }
 
-/** Restarts OpenChamber so a fresh settings copy takes effect. Returns
- *  true when the restart succeeded (warns otherwise, like the shell).
+/** Restarts OpenChamber so a fresh settings copy takes effect: the
+ *  LaunchAgent is re-created (`startup disable` + `startup enable`) after
+ *  sourcing ~/.zprofile, so both the copied settings and the user's
+ *  zprofile exports (OPENCHAMBER_DATA_DIR, OPENCODE_DATA_DIR, ...) land
+ *  in the service's environment snapshot — `openchamber restart` alone
+ *  would keep the old launchd environment. Returns true when the restart
+ *  succeeded (warns otherwise, like the shell).
  *
  * @param vm - The running VM name.
+ * @param port - The OpenChamber web port (context.openchamberPort).
  * @returns True when restarted.
  */
-export async function restartOpenchamber(vm: string): Promise<boolean> {
-  const res = await execVm(vm, ['sh', '-s'], { input: openchamberRestartScript() });
+export async function restartOpenchamber(vm: string, port: number): Promise<boolean> {
+  const res = await execVm(vm, ['sh', '-s'], { input: openchamberRestartScript(port) });
   if (res.code !== 0) {
     logger.warn(
       'could not restart OpenChamber — it will pick up the new settings on its next start.',
     );
     return false;
   }
-  logger.ok('Restarted OpenChamber so it picks up the new user settings.');
+  logger.ok('Restarted OpenChamber with the fresh environment (user settings + ~/.zprofile).');
   return true;
 }
 
@@ -242,12 +248,14 @@ export async function ensureUserSettings(
  * @param vm - The running VM name.
  * @param home - The host home directory.
  * @param yes - Skip confirmations.
+ * @param port - The OpenChamber web port (for the service re-snapshot).
  * @returns The outcome (copied | none | declined | failed).
  */
 export async function syncUserSettings(
   vm: string,
   home: string,
   yes: boolean,
+  port: number,
 ): Promise<SettingsState> {
   const files = collectSettingsFiles(home);
   if (files.length === 0) {
@@ -264,6 +272,6 @@ export async function syncUserSettings(
   }
   await copySettingsToGuest(vm, files, home);
   logger.ok(`Copied ${files.length} item(s) into the guest (version ${SETTINGS_VERSION}).`);
-  await restartOpenchamber(vm);
+  await restartOpenchamber(vm, port);
   return 'copied';
 }

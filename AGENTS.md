@@ -79,23 +79,27 @@ agent-dev-env/
 │   │   │   │                   #   deploy.ts + tag.ts + watch-build.ts
 │   │   │   ├── runners/        #   run framework + the macOS
 │   │   │   │                   #   backend (macos*.ts: bridges/guest/rules/
-│   │   │   │                   #   summary), the Ubuntu VMware backend
+│   │   │   │                   #   summary + macos-provenance.ts), the Ubuntu
+│   │   │   │                   #   VMware backend
 │   │   │   │                   #   (ubuntu*.ts: image/shared/bridges/guest/
 │   │   │   │                   #   rules/summary), the Windows VMware
 │   │   │   │                   #   backend (windows*.ts: image/guest/bridges/
 │   │   │   │                   #   autologon/shared/summary, via the shared
-│   │   │   │                   #   vmware-image.ts/vmware-common.ts) and the
+│   │   │   │                   #   vmware-image.ts (clone/upgrade) +
+│   │   │   │                   #   vmware-image-archive.ts (archive pick/base)/
+│   │   │   │                   #   vmware-common.ts) and the
 │   │   │   │                   #   Windows QEMU backend (windows-qemu.ts +
 │   │   │   │                   #   qemu-image.ts + windows-qemu-summary.ts via
 │   │   │   │                   #   the shared windows-bridges/windows-guest/
 │   │   │   │                   #   windows-autologon + lib/qemu.ts)
 │   │   │   ├── settings/       #   user-settings copy: shared builders
 │   │   │   │                   #   (common.ts) + per-transport IO — macos.ts/
-│   │   │   │                   #   macos-copy.ts (tart) and ubuntu.ts/
-│   │   │   │                   #   ubuntu-copy.ts (ssh2)
+│   │   │   │                   #   macos-copy.ts (tart), ubuntu.ts/
+│   │   │   │                   #   ubuntu-copy.ts (ssh2) and windows.ts/
+│   │   │   │                   #   windows-copy.ts (psExec + SFTP, ssh2)
 │   │   │   ├── lib/            #   foundations: logger, prompt, vars, template,
 │   │   │   │                   #   ghcr, paths, exec, git, platform, vmrun,
-│   │   │   │                   #   tart, ssh, network, qemu, ...
+│   │   │   │                   #   tart, ssh, network, qemu, provenance, ...
 │   │   │   └── **/*.test.ts    #   co-located unit tests
 │   │   ├── scripts/
 │   │   │   └── copy-assets.mjs #   build step: tsc + esbuild bundles +
@@ -371,6 +375,12 @@ Universal design principles this codebase follows:
 - **Bounded Startup Latency** — anything network-bound (image pulls,
   engine discovery, guest probes) runs with explicit retries and
   timeouts (`withTimeout`), never an unbounded wait.
+- **Signal Forwarding** — long-running child processes must never be
+  orphaned: the CLI forwards its own SIGINT/SIGTERM to the child it
+  spawned and waits for it to exit, so a Ctrl+C during `tart push` /
+  `oras push` / `packer build` / VM stops stops the child too (the
+  forwarding lives in `run()`; the runner-specific handlers exist only
+  where the child is spawned directly, e.g. foreground `tart run`).
 - **Keep It Boring** — prefer well-understood patterns over clever or
   novel solutions. Behavior must match the shell scripts' established
   semantics (prompts, port defaults, messages) unless a deviation is
@@ -561,6 +571,16 @@ operational incidents.
   `sandbox-windows-<version>-arm64-vmware`,
   `sandbox-ubuntu-<version>-arm64-vmware`). The Xcode version is NOT part
   of the mac name. Never introduce a separate naming scheme.
+- **Sandbox instances**: every platform runs sandboxes as named
+  *instances* of a pristine image (`SANDBOX_VM`, default
+  `default-agent-dev-env`, strict kebab-case). The pristine image cache
+  (`image/`, `base/`) is shared and keyed by image only; the mutable
+  working state (VMware clone, QEMU COW overlay + TPM + EFI NVRAM,
+  pidfiles, `clone.json`) lives under `working/<instance>/`.
+  `run`/`stop`/`delete`/`sync`/`status` all resolve the instance through
+  the same env var; host bridges are keyed by role + port + instance (an
+  instance on another instance's port dies with a `SANDBOX_*_PORT` hint,
+  never silently reuses its bridge).
 - **Releases**: the two version tracks (CLI + per-image
   `image_version`), their tags, changelogs, and the CI/npm rule are
   described in [Releases, Tags, and Changelogs](#releases-tags-and-changelogs).
@@ -575,6 +595,17 @@ operational incidents.
   comments and in non-PowerShell files.
 - **Guest markers**: guest-side state markers live under
   `~/.config/agent-dev-env/` (green-field policy; no legacy paths).
+- **Image provenance**: every image must answer "which image is this
+  sandbox from" without forensics. The guest records its identity in
+  `~/.config/agent-dev-env/image.json` (baked by the Packer templates:
+  image name, `image_version`, platform, base versions); the runners
+  record the host-side provenance under the per-instance state root
+  (`lib/provenance.ts`): `image.json` (the pulled ref + best-effort
+  registry digest) and `working/<instance>/clone.json` (what the working
+  VM was cloned from + when, or a `backfilled` record for VMs cloned
+  before tracking). `status` and the run summaries surface both. Records
+  are best-effort and never fatal; cleared with the working VM/pristine
+  image.
 
 **Rationale**: These invariants keep the CLI, recipes, and releases
 consistent.

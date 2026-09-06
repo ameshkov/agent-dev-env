@@ -36,7 +36,7 @@ export async function ensureGuestAgent(
   gateway: string | undefined,
 ): Promise<void> {
   const upload = await execVm(
-    context.vm,
+    context.instance,
     ['sh', '-c', `mkdir -p ${GUEST_LIB_DIR} && cat > ${GUEST_AGENT}`],
     { input: readFileSync(guestAgentPath(), 'utf8') },
   );
@@ -56,7 +56,7 @@ export async function ensureGuestAgent(
   if (gateway) {
     installArgs.push('--host-alias', gateway);
   }
-  const install = await execVm(context.vm, installArgs);
+  const install = await execVm(context.instance, installArgs);
   if (install.code !== 0) {
     logger.warn(`guest agent install failed (tart exec: ${install.code}).`);
     return;
@@ -76,7 +76,7 @@ export async function readGuestStatus(
   state: RunState,
   node: string,
 ): Promise<void> {
-  const res = await execVm(context.vm, [node, GUEST_AGENT, 'status']);
+  const res = await execVm(context.instance, [node, GUEST_AGENT, 'status']);
   if (res.code !== 0) {
     return;
   }

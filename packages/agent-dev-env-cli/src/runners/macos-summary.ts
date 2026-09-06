@@ -5,6 +5,7 @@
 
 import { existsSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
+import { cloneSourceLine } from '../lib/provenance.js';
 import { vmIp, vmState } from '../lib/tart.js';
 import type { RunContext, RunState } from './framework.js';
 
@@ -15,12 +16,13 @@ import type { RunContext, RunState } from './framework.js';
  * @param state - The accumulated run state.
  */
 export async function printMacosSummary(context: RunContext, state: RunState): Promise<void> {
-  const ip = await vmIp(context.vm);
-  const vmStateNow = (await vmState(context.vm)) ?? 'stopped';
+  const ip = await vmIp(context.instance);
+  const vmStateNow = (await vmState(context.instance)) ?? 'stopped';
 
   logger.step('Sandbox is ready');
   const ipDesc = ip ? `IP ${ip}` : 'IP unavailable';
-  summaryLine('VM', `${logger.bold(context.vm)} (${vmStateNow}, ${ipDesc})`);
+  summaryLine('VM', `${logger.bold(context.instance)} (${vmStateNow}, ${ipDesc})`);
+  summaryLine('Image source', cloneSourceLine('macos', context.image, context.instance));
   if (context.workDir && existsSync(context.workDir)) {
     summaryLine('Shared dir', `${context.workDir} (in the guest: ${context.guestMount})`);
   } else {

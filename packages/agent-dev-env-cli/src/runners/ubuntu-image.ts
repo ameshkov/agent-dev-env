@@ -1,8 +1,9 @@
 // runners/ubuntu-image.ts — step 1 for the Ubuntu backend: the
-// ubuntu-vmware binding of the shared VMware image flow (vmware-image.ts).
-// The shared module holds the archive pick/extract, the base clone + the
-// display name + the one-time hardware upgrade; this wrapper only binds
-// the platform id and the UBUNTU_VMWARE_IMAGE override var.
+// ubuntu-vmware binding of the shared VMware image flow (vmware-image.ts
+// + vmware-image-archive.ts). The shared modules hold the archive
+// pick/extract, the base clone + the display name + the one-time hardware
+// upgrade; this wrapper only binds the platform id and the
+// UBUNTU_VMWARE_IMAGE override var.
 
 import type { RunContext, RunState } from './framework.js';
 import { ensureVmwareImage, vmwareWorkingVmx } from './vmware-image.js';
@@ -10,14 +11,14 @@ import { ensureVmwareImage, vmwareWorkingVmx } from './vmware-image.js';
 /** The platform id for the VMware path helpers. */
 const PLATFORM = 'ubuntu-vmware' as const;
 
-/** @internal — the pristine-archive identity (see vmware-image.ts) —
- *  re-exported so the co-located test keeps its import path.
+/** @internal — the pristine-archive identity (see vmware-image-archive.ts)
+ *  — re-exported so the co-located test keeps its import path.
  */
-export { archiveIdentity } from './vmware-image.js';
+export { archiveIdentity } from './vmware-image-archive.js';
 
 /** The working clone's vmx. */
-export function ubuntuWorkingVmx(image: string): string {
-  return vmwareWorkingVmx(PLATFORM, image);
+export function ubuntuWorkingVmx(image: string, instance: string): string {
+  return vmwareWorkingVmx(PLATFORM, image, instance);
 }
 
 /** Step 1: select the archive, extract the base, clone the working VM

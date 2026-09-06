@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parsePortEnv, resolveRunOptions } from './options.js';
+import { parsePortEnv, resolveInstance, resolveRunOptions } from './options.js';
+
+const DEFAULT = 'default-agent-dev-env';
 
 const ENV = {
   PATH: '/usr/bin:/bin',
@@ -10,7 +12,7 @@ describe('resolveRunOptions', () => {
   it('falls back to the platform defaults when nothing is set', () => {
     const options = resolveRunOptions('macos', {}, ENV, '/Users/test');
     expect(options.image).toBe('sandbox-macos-tahoe');
-    expect(options.vm).toBe('sandbox-macos');
+    expect(options.instance).toBe(DEFAULT);
     expect(options.workDir).toBe('/Volumes/dev');
     expect(options.mountName).toBe('dev');
     expect(options.agentPort).toBe(4100);
@@ -26,7 +28,7 @@ describe('resolveRunOptions', () => {
     const env = { ...ENV, SANDBOX_IMAGE: 'env-image', SANDBOX_VM: 'env-vm' };
     const options = resolveRunOptions('macos', { image: 'flag-image' }, env, '/Users/test');
     expect(options.image).toBe('flag-image');
-    expect(options.vm).toBe('env-vm');
+    expect(options.instance).toBe('env-vm');
   });
 
   it('reads the SANDBOX_* overrides including ports', () => {
@@ -40,12 +42,30 @@ describe('resolveRunOptions', () => {
       SANDBOX_MEMORY_MB: '8192',
     };
     const options = resolveRunOptions('macos', {}, env, '/Users/test');
-    expect(options.vm).toBe('my-project');
+    expect(options.instance).toBe('my-project');
     expect(options.workDir).toBe('/tmp/work');
     expect(options.mountName).toBe('work');
     expect(options.agentPort).toBe(5100);
     expect(options.dockerPort).toBe(5101);
     expect(options.memoryMb).toBe(8192);
+  });
+
+  it('resolves the instance on every platform', () => {
+    expect(resolveRunOptions('windows-qemu', {}, ENV).instance).toBe(DEFAULT);
+    expect(resolveRunOptions('windows-vmware', {}, ENV).instance).toBe(DEFAULT);
+    expect(resolveRunOptions('ubuntu-vmware', {}, ENV).instance).toBe(DEFAULT);
+    expect(resolveRunOptions('ubuntu-vmware', {}, { ...ENV, SANDBOX_VM: 'ci' }).instance).toBe(
+      'ci',
+    );
+  });
+
+  it('throws on an invalid SANDBOX_VM', () => {
+    expect(() => resolveRunOptions('macos', {}, { ...ENV, SANDBOX_VM: 'Bad/Name' })).toThrow(
+      /invalid SANDBOX_VM/,
+    );
+    expect(() => resolveRunOptions('macos', {}, { ...ENV, SANDBOX_VM: '..' })).toThrow(
+      /invalid SANDBOX_VM/,
+    );
   });
 
   it('resolves the forwarded ports (windows-qemu defaults + overrides)', () => {
@@ -77,6 +97,23 @@ describe('resolveRunOptions', () => {
     expect(() => resolveRunOptions('macos', {}, { ...ENV, SANDBOX_AGENT_PORT: 'abc' })).toThrow(
       /invalid SANDBOX_AGENT_PORT port/,
     );
+  });
+});
+
+describe('resolveInstance', () => {
+  it('defaults to "default-agent-dev-env" when SANDBOX_VM is unset or empty', () => {
+    expect(resolveInstance({})).toBe(DEFAULT);
+    expect(resolveInstance({ SANDBOX_VM: '' })).toBe(DEFAULT);
+    expect(resolveInstance({ SANDBOX_VM: '   ' })).toBe(DEFAULT);
+  });
+
+  it('accepts kebab-case instance names and rejects unsafe ones', () => {
+    expect(resolveInstance({ SANDBOX_VM: 'my-project' })).toBe('my-project');
+    expect(resolveInstance({ SANDBOX_VM: 'proj-1' })).toBe('proj-1');
+    expect(() => resolveInstance({ SANDBOX_VM: 'Bad/Name' })).toThrow(/invalid SANDBOX_VM/);
+    expect(() => resolveInstance({ SANDBOX_VM: '..' })).toThrow(/invalid SANDBOX_VM/);
+    expect(() => resolveInstance({ SANDBOX_VM: '-leading-dash' })).toThrow(/invalid SANDBOX_VM/);
+    expect(() => resolveInstance({ SANDBOX_VM: 'has.space' })).toThrow(/invalid SANDBOX_VM/);
   });
 });
 

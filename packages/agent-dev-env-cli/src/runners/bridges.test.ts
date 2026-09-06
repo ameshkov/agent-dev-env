@@ -3,7 +3,14 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { canConnectTcp, findHostAgentSocket, findHostDockerSocket } from './bridges.js';
+import { paths } from '../lib/paths.js';
+import {
+  bridgeConflictMessage,
+  bridgePidFile,
+  canConnectTcp,
+  findHostAgentSocket,
+  findHostDockerSocket,
+} from './bridges.js';
 
 let server: Server | undefined;
 
@@ -59,6 +66,29 @@ describe('findHostDockerSocket', () => {
     // point the system-wide candidate inside the empty temp home so the
     // test is deterministic on any host.
     expect(findHostDockerSocket(home, join(home, 'no-system-socket'))).toBeUndefined();
+  });
+});
+
+describe('bridgePidFile', () => {
+  it('keys the pidfile by role, port and instance', () => {
+    expect(bridgePidFile('ssh-agent', 4100, 'default-agent-dev-env')).toBe(
+      join(paths.logs, 'bridge-ssh-agent-4100-default-agent-dev-env.pid'),
+    );
+    expect(bridgePidFile('docker', 4101, 'project-a')).toBe(
+      join(paths.logs, 'bridge-docker-4101-project-a.pid'),
+    );
+  });
+});
+
+describe('bridgeConflictMessage', () => {
+  it('names the SANDBOX_*_PORT env var for the role', () => {
+    expect(bridgeConflictMessage('ssh-agent', 'default-agent-dev-env', 4100)).toContain(
+      'SANDBOX_AGENT_PORT',
+    );
+    expect(bridgeConflictMessage('docker', 'default-agent-dev-env', 4101)).toContain(
+      'SANDBOX_DOCKER_PORT',
+    );
+    expect(bridgeConflictMessage('docker', 'project-a', 4101)).toContain("instance 'project-a'");
   });
 });
 

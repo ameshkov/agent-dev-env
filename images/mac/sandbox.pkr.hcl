@@ -88,6 +88,50 @@ variable "python_version" {
   # python/python3/pip/pip3 aliases.
 }
 
+# Optional toolchain versions. Empty (or an empty list) skips the tool; the
+# non-empty values live in the image's vars file — see
+# vars/sandbox-macos-tahoe.pkrvars.hcl. The Cirrus base images already ship
+# Flutter (at $FLUTTER_HOME) and the full Android SDK (cmdline-tools,
+# platform-tools, platforms;android-36, build-tools;36.0.0, NDK 28.2,
+# openjdk@17, licenses accepted) — the vars below only pin versions and
+# pre-install extras on top, mirroring the AdGuard build-agent-images recipe.
+
+variable "rust_version" {
+  type        = string
+  default     = ""
+  description = "Rust toolchain to install via rustup, e.g. \"1.95\"; also adds the aarch64/x86_64 macOS + iOS targets. Empty = skip."
+}
+
+variable "java_version" {
+  type        = string
+  default     = ""
+  description = "SDKMAN Java version to install and set as the default, e.g. \"17.0.11-oracle\". Empty = skip."
+}
+
+variable "flutter_version" {
+  type        = string
+  default     = ""
+  description = "Flutter version to check out at FLUTTER_HOME (shipped in the Cirrus base image). Empty = keep the base checkout."
+}
+
+variable "gradle_version" {
+  type        = string
+  default     = ""
+  description = "Gradle version to pre-cache the wrapper distribution for, e.g. \"8.7\". Empty = skip."
+}
+
+variable "kotlin_native_version" {
+  type        = string
+  default     = ""
+  description = "Kotlin/Native version to pre-cache for macos-aarch64, e.g. \"1.9.24\" (under ~/.konan). Empty = skip."
+}
+
+variable "android_sdk_packages" {
+  type        = list(string)
+  default     = []
+  description = "Android SDK packages to pre-install via sdkmanager on top of the base image's SDK, e.g. [\"ndk;29.0.14206865\"]. Empty = keep the base packages."
+}
+
 variable "brew_formulas" {
   type = list(string)
   default = [
@@ -99,8 +143,17 @@ variable "brew_formulas" {
     # via nvm — see the "Node.js via nvm" provisioner below)
     "nvm",
     # The required programming languages (Python is installed separately by
-    # the toolchain provisioner, pinned via python_version)
-    "ruby",
+    # the toolchain provisioner, pinned via python_version; Ruby comes with
+    # rbenv so projects can pin their own interpreter)
+    "ruby", "rbenv",
+    # C/C++ build systems
+    "cmake", "ninja",
+    # Go (the brew formula is named `go`)
+    "go",
+    # Swift/iOS tooling: project generation, linting, dead-code analysis
+    "xcodegen", "swiftlint", "periphery",
+    # Large-file storage (the `git lfs` filter is wired up below)
+    "git-lfs",
     # Docker CLI + plugins (client only — the sandbox is a macOS VM and cannot
     # run a local container engine, see docs/macos.md "Docker (remote engine)";
     # the compose/buildx plugins are wired up in the provisioner below)
@@ -233,8 +286,13 @@ NVM
 source ~/.zprofile
 nvm install ${var.node_version}
 nvm alias default ${var.node_version}
+# Package managers for frontend/Node projects (same npm globals as the
+# Ubuntu image).
+npm install --global yarn pnpm
 
 node --version && npm --version
+pnpm --version
+yarn --version
 nvm --version
 END
     ]
@@ -431,6 +489,189 @@ END
     ]
   }
 
+  # Git LFS, SSH legacy-key compatibility and CocoaPods specs block.
+  #  - `git lfs install` wires the filter into the admin user's global git
+  #    config (the git-lfs binary comes from the brew formula above).
+  #  - The SSH config re-enables ssh-rsa key exchange for legacy hosts
+  #    (Bitbucket-era servers) and skips host-key prompts — the sandbox is a
+  #    short-lived VM behind Tart's NAT, and an agent-driven SSH client must
+  #    not hang on an unknown host key. The runner's bridge setup appends its
+  #    IdentityAgent block to this file (docs/ssh-agent.md); a second
+  #    `Host *` block merges cleanly.
+  #  - Blocking the deprecated CocoaPods specs repo (4+ GB, causes hangs)
+  #    makes `pod` fail fast instead of stalling on a clone. Same trick as
+  #    the AdGuard build-agent-images recipe.
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+source ~/.zprofile
+
+git lfs install
+
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+cat > ~/.ssh/config <<'SSH'
+Host *
+    PubkeyAcceptedKeyTypes +ssh-rsa
+    HostKeyAlgorithms +ssh-rsa
+    StrictHostKeyChecking no
+SSH
+chmod 600 ~/.ssh/config
+
+git config --global url."cocoapods-specs-repo-is-forbidden".insteadOf https://github.com/CocoaPods/Specs
+
+git lfs version
+END
+    ]
+  }
+
+  # Rust via rustup — pinned toolchain plus the cross-compile targets for all
+  # macOS/iOS platforms, so `cargo build --target aarch64-apple-ios` and
+  # friends work without a one-off rustup run (same shape as the AdGuard
+  # recipe).
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+source ~/.zprofile
+if [ -z '${var.rust_version}' ]; then echo 'Skipping Rust'; exit 0; fi
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${var.rust_version}
+source "$HOME/.cargo/env"
+rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-darwin x86_64-apple-ios
+grep -qxF '. "$HOME/.cargo/env"' ~/.zprofile || \
+    echo '. "$HOME/.cargo/env"' >> ~/.zprofile
+rustc --version
+cargo --version
+END
+    ]
+  }
+
+  # Java via SDKMAN. SDKMAN 5.x requires bash 4+, while macOS /bin/bash is
+  # 3.2 — brew's bash (brew_formulas) is used explicitly, exactly like the
+  # AdGuard recipe. The plain JAVA_HOME/PATH exports are written to
+  # ~/.zprofile so login shells do not need sdkman's init script at runtime.
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+source ~/.zprofile
+if [ -z '${var.java_version}' ]; then echo 'Skipping Java'; exit 0; fi
+# SDKMAN 5.x needs bash 4+; macOS /bin/bash is 3.2. Use brew's bash.
+export SHELL=/opt/homebrew/bin/bash
+curl -fsSL https://get.sdkman.io | /opt/homebrew/bin/bash
+/opt/homebrew/bin/bash -lc 'source /Users/admin/.sdkman/bin/sdkman-init.sh && yes | sdk install java ${var.java_version} && sdk default java ${var.java_version}'
+
+cat >> ~/.zprofile <<'ZPROFILE'
+# Java via SDKMAN (plain exports — no sdkman-init.sh needed at runtime)
+export JAVA_HOME="/Users/admin/.sdkman/candidates/java/current"
+export PATH="$JAVA_HOME/bin:$PATH"
+ZPROFILE
+source ~/.zprofile
+java -version
+END
+    ]
+  }
+
+  # Flutter — the Cirrus base image ships Flutter at $FLUTTER_HOME
+  # (~/flutter, stable checkout, precached); this only pins the exact
+  # version, since Flutter force-updates its branches/tags upstream and a
+  # plain `git pull` fails with divergent branches (same workflow as the
+  # AdGuard recipe).
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+source ~/.zprofile
+if [ -z '${var.flutter_version}' ]; then echo 'Skipping Flutter'; exit 0; fi
+if [ -z "$FLUTTER_HOME" ]; then echo "WARN: FLUTTER_HOME not set, skipping Flutter"; exit 0; fi
+cd "$FLUTTER_HOME"
+git fetch --all --tags --prune --force
+git checkout ${var.flutter_version}
+flutter doctor --android-licenses || true
+flutter precache
+flutter doctor
+END
+    ]
+  }
+
+  # Gradle wrapper pre-cache — brew's gradle resolves the pinned wrapper
+  # distribution once during the build, so a project's first `./gradlew`
+  # does not download it. The scratch project is thrown away; the cached
+  # distribution stays in ~/.gradle.
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+source ~/.zprofile
+if [ -z '${var.gradle_version}' ]; then echo 'Skipping Gradle pre-cache'; exit 0; fi
+brew install --quiet gradle
+tmpdir=$(mktemp -d)
+cd "$tmpdir"
+gradle init --type basic --dsl kotlin --project-name warmup --no-daemon -q 2>&1 | tail -3
+gradle wrapper --gradle-version ${var.gradle_version} --distribution-type all --no-daemon -q
+./gradlew help --no-daemon -q
+cd /
+rm -rf "$tmpdir"
+echo "Gradle ${var.gradle_version} wrapper cached"
+END
+    ]
+  }
+
+  # Kotlin/Native pre-cache — the ~1 GB prebuilt compiler for macos-aarch64
+  # lands in ~/.konan so the first Kotlin/Native compile does not download
+  # it. The URL uses $$ (HCL renders it to $) because the version is a bash
+  # variable here (same escaping as the AdGuard recipe).
+  provisioner "shell" {
+    inline = [<<-END
+set -e
+if [ -z '${var.kotlin_native_version}' ]; then echo 'Skipping Kotlin/Native pre-cache'; exit 0; fi
+kn_version="${var.kotlin_native_version}"
+kn_url="https://download.jetbrains.com/kotlin/native/builds/releases/$${kn_version}/macos-aarch64/kotlin-native-prebuilt-macos-aarch64-$${kn_version}.tar.gz"
+mkdir -p /Users/admin/.konan
+curl -fsSL "$${kn_url}" | tar -xz -C /Users/admin/.konan/
+echo "Kotlin/Native $${kn_version} cached at ~/.konan"
+END
+    ]
+  }
+
+  # Android SDK packages — the Cirrus base image ships the SDK
+  # ($ANDROID_HOME/cmdline-tools/latest, licenses accepted, default packages
+  # platforms;android-36 + build-tools;36.0.0 + ndk;28.2.13676358). This
+  # pre-installs the extra packages a pipeline pins (e.g. an older NDK or
+  # build-tools), so the first build does not run sdkmanager itself.
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+source ~/.zprofile
+if [ '${length(var.android_sdk_packages)}' -eq '0' ]; then echo 'Skipping Android SDK packages'; exit 0; fi
+sdkmanager="$${ANDROID_HOME:-/Users/admin/android-sdk}/cmdline-tools/latest/bin/sdkmanager"
+if [ ! -x "$${sdkmanager}" ]; then echo "sdkmanager not found at $${sdkmanager}"; exit 1; fi
+"$${sdkmanager}" --licenses >/dev/null 2>&1 || true
+yes | "$${sdkmanager}" ${join(" ", [for p in var.android_sdk_packages : "\"${p}\""])}
+echo "Android SDK packages installed"
+END
+    ]
+  }
+
+  # Warm up Xcode and a simulator so the first launch in the sandbox does not
+  # cold-start (Xcode's first boot and the simulator runtime boot are the
+  # slowest parts of a fresh macOS dev session). Same approach as the AdGuard
+  # recipe: boot the Pro Max device, then shut it down again — caches stay
+  # warm. gtimeout comes from coreutils.
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+source ~/.zprofile
+DEVICE_NAME=$(xcrun simctl list -j | jq -r '.devices[] | .[] | select(.name | contains("Pro Max")) | .name' | head -1)
+if [ -z "$DEVICE_NAME" ]; then
+  echo "No Pro Max simulator found, skipping warmup"
+  exit 0
+fi
+XCODE_PATH=$(dirname $(xcode-select -p))
+gtimeout --signal=9 299 "$XCODE_PATH/MacOS/Xcode" || true
+xcrun simctl boot "$DEVICE_NAME" || true
+gtimeout --signal=9 299 "$XCODE_PATH/Developer/Applications/Simulator.app/Contents/MacOS/Simulator" || true
+xcrun simctl shutdown "$DEVICE_NAME" || true
+END
+    ]
+  }
+
   # Final verification and cleanup
   provisioner "shell" {
     inline = [<<-END
@@ -444,12 +685,22 @@ xcodebuild -version
 brew --version | head -1
 node --version
 npm --version
+pnpm --version
+yarn --version
 nvm --version
 python3 --version
 pip3 --version
 ruby --version
+rbenv --version
 git --version
+git lfs version
 gh --version | head -1
+go version
+cmake --version | head -1
+ninja --version
+xcodegen --version
+swiftlint --version
+periphery version
 code --version | head -1
 subl --version
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
@@ -461,7 +712,37 @@ defaults read "/Applications/OpenChamber.app/Contents/Info.plist" CFBundleShortV
 docker --version
 docker compose version
 docker buildx version
+# Optional toolchains — verified only when pinned in the vars file (a bare
+# `packer build` without a vars file skips them).
+if [ -n '${var.rust_version}' ]; then rustc --version && cargo --version; fi
+if [ -n '${var.java_version}' ]; then java -version 2>&1 | head -1; fi
+if [ -n '${var.flutter_version}' ]; then flutter --version | head -3; fi
+if [ -n '${var.gradle_version}' ]; then gradle --version | head -2; fi
+if [ -n '${var.kotlin_native_version}' ]; then test -d ~/.konan && echo "Kotlin/Native: precached in ~/.konan"; fi
+if [ '${length(var.android_sdk_packages)}' -gt '0' ]; then ls -1 "$ANDROID_HOME/ndk" 2>/dev/null; fi
 echo "========================================"
+END
+    ]
+  }
+
+  # Image identity — the image records its own name/version inside the
+  # guest (~/.config/agent-dev-env/image.json, the green-field guest
+  # marker dir), so any clone of it can answer "which image am I" without
+  # host-side provenance records.
+  provisioner "shell" {
+    inline = [<<-END
+set -e -x
+mkdir -p ~/.config/agent-dev-env
+cat > ~/.config/agent-dev-env/image.json <<JSON
+{
+  "image": "sandbox-macos-${var.macos_version}",
+  "image_version": "${var.image_version}",
+  "platform": "macos",
+  "macos_version": "${var.macos_version}",
+  "xcode_version": "${var.xcode_version}"
+}
+JSON
+cat ~/.config/agent-dev-env/image.json
 END
     ]
   }

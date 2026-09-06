@@ -12,6 +12,7 @@ import { statusCmd } from './status.js';
 import { stopCmd } from './stop.js';
 import { syncCmd } from './sync.js';
 import { buildCmd } from '../lifecycle/build.js';
+import { listImages, type CatalogImage } from '../lifecycle/catalog.js';
 import { deployCmd } from '../lifecycle/deploy.js';
 import { tagCmd } from '../lifecycle/tag.js';
 import { watchBuildCmd } from '../lifecycle/watch-build.js';
@@ -29,6 +30,35 @@ function parsePlatform(value: string): string {
   return value;
 }
 
+/** The catalog's images (repo checkout first, then the bundled snapshot)
+ *  for the lifecycle help text; empty when none are discoverable.
+ *
+ * @returns The available images, or an empty list on catalog errors.
+ */
+function availableImages(): CatalogImage[] {
+  try {
+    return listImages();
+  } catch {
+    return [];
+  }
+}
+
+/** The trailing help text for the image-taking lifecycle commands (build,
+ *  deploy) listing the available images.
+ *
+ * @param images - The catalog images (empty when none were discovered).
+ * @returns The help text (no trailing newline).
+ */
+function imagesHelpText(images: CatalogImage[]): string {
+  if (images.length === 0) {
+    return 'Available images: none discovered — run `agent-dev-env list`.';
+  }
+  return [
+    'Available images:',
+    ...images.map((image) => `  ${image.name} (${image.platform})`),
+  ].join('\n');
+}
+
 /** Registers run/stop/delete/sync — the per-platform VM commands.
  *
  * @param program - The commander program to wire commands onto.
@@ -36,6 +66,7 @@ function parsePlatform(value: string): string {
 export function registerVmCommands(program: Command): void {
   program
     .command('run')
+    .alias('start')
     .argument('<platform>', PLATFORM_CHOICE, parsePlatform)
     .description(
       'Run (and wire up) a sandbox VM: macos | windows-qemu | windows-vmware | ubuntu-vmware',
@@ -76,7 +107,7 @@ export function registerVmCommands(program: Command): void {
     .command('sync')
     .argument('<platform>', PLATFORM_CHOICE, parsePlatform)
     .option('--yes', 'do not ask for confirmation')
-    .description('Copy the host user settings into the guest (macos | ubuntu-vmware)')
+    .description('Copy the host user settings into the guest')
     .action(async (platform: Platform, options: object) => {
       process.exitCode = await syncCmd(platform, options as Parameters<typeof syncCmd>[1]);
     });
@@ -108,12 +139,14 @@ export function registerStatusCommands(program: Command): void {
  * @param program - The commander program to wire commands onto.
  */
 export function registerLifecycleCommands(program: Command): void {
+  const images = availableImages();
   program
     .command('build')
-    .argument('[image...]', 'image names')
+    .argument('[image...]', 'image names (no image = build all available images)')
     .option('--force', 'force a rebuild (packer -force)')
     .option('--no-watchdog', 'skip the VNC build watchdog')
     .description('Build sandbox images with Packer')
+    .addHelpText('after', `\n${imagesHelpText(images)}`)
     .action(async (images: string[], options: { force?: boolean; watchdog?: boolean }) => {
       process.exitCode = await buildCmd(images, {
         force: options.force,
@@ -123,9 +156,10 @@ export function registerLifecycleCommands(program: Command): void {
 
   program
     .command('deploy')
-    .argument('[image...]', 'image names')
+    .argument('[image...]', 'image names (no image = deploy all available images)')
     .option('--owner <owner>', 'GHCR owner override')
     .description('Push locally built images to GHCR')
+    .addHelpText('after', `\n${imagesHelpText(images)}`)
     .action(async (images: string[], options: { owner?: string }) => {
       process.exitCode = await deployCmd(images, { owner: options.owner });
     });

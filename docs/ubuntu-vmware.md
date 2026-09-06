@@ -79,11 +79,12 @@ the image archive: the local build output
 when present, otherwise it asks to pull
 `sandbox-ubuntu-24-04-arm64-vmware:latest` from GHCR via
 [oras](https://oras.land/) (one-time, ~15 GB — `brew install oras`). It
-then extracts the pristine VM and clones a working VM under
-`~/Library/Application Support/agent-dev-env/ubuntu-vmware/<image>/`
-(the clone's display name in Fusion's library is
-`agent-dev-env-ubuntu-24-04-arm64-vmware` — the base keeps the image's
-name) — the pristine image is never written to. On the first clone the CLI
+then extracts the pristine VM (once; the cache is shared across
+instances) and clones a working VM per instance under
+`~/Library/Application Support/agent-dev-env/ubuntu-vmware/<image>/working/<instance>/`
+(the clone's display name in Fusion's library is the instance name —
+the base keeps the image's name) — the pristine image is never written to.
+On the first clone the CLI
 also upgrades the working VM's virtual hardware to the version your
 Fusion supports (`vmrun upgradevm`, recorded once per clone) — without it
 a newer Fusion shows its one-time "Upgrade this virtual machine?" dialog
@@ -124,9 +125,13 @@ skip a bridge, `--no-settings` to skip the host user-settings copy,
 The CLI notices when the image itself changes: it records the archive's
 modification time and size (not just its path — a rebuild or `oras pull`
 replaces the archive at the same path), so the next run after a rebuild or
-re-pull automatically re-extracts the pristine VM and drops the old
-working clone. The old clone's guest state is lost in that case, the same
-as with `--reset`; pass `--reset` to force it right away.
+re-pull asks before re-extracting the pristine VM: the new image requires
+a fresh clone, and the old working clone's guest state (installs, config,
+agent files) is lost with it. The prompt defaults to *no* — declining
+keeps the previous image and the working instances, and the run continues
+on them; accept to switch to the new image. With no working instances
+nothing is lost and the re-extraction happens silently. `--reset` deletes
+the working state right away.
 
 ### 3. Use the sandbox
 
@@ -195,24 +200,46 @@ systemctl --user restart agent-dev-env-openchamber
   npx agent-dev-env run ubuntu-vmware --reset
   ```
 
-- **Delete the sandbox** — remove the state from the host (extracted
-  pristine base + working clone + pulled image cache) and free the disk
-  space:
+- **Delete the sandbox** — remove the instance's state (the working
+  clone; the shared pristine image cache goes with the last instance) and
+  free the disk space:
 
   ```bash
   npx agent-dev-env delete ubuntu-vmware --yes
   ```
 
-  This stops the working VM first, then removes the platform's state dir
-  under `~/Library/Application Support/agent-dev-env/ubuntu-vmware/`. The
-  next run re-pulls the archive and re-clones. Without `--yes` it asks
+  This stops the working VM first, then removes the instance's state dir
+  under `~/Library/Application Support/agent-dev-env/ubuntu-vmware/<image>/working/<instance>/`.
+  The next run re-clones the instance. Other instances keep the shared
+  pristine image. Without `--yes` it asks
   before deleting. Note: Fusion's VM library may still list the deleted
-  working VM (`agent-dev-env-ubuntu-24-04-arm64-vmware`) — remove the
+  working VM — remove the
   stale entry in the Fusion UI (harmless).
 
-- **Run several sandboxes side by side** — set `AGENT_DEV_ENV_DATA_HOME` to
-  a different root (the guest IPs differ per NAT lease; the CLI prints
-  them).
+- **Run several sandboxes side by side** — set a distinct `SANDBOX_VM`
+  per sandbox (instances share the pristine image, one download) and free
+  ports: `SANDBOX_AGENT_PORT` / `SANDBOX_DOCKER_PORT`.
+
+> [!TIP]
+> Once a sandbox is configured the way you like it (installed tools,
+> provider login, VS Code extensions — everything the working clone
+> accumulated), promote it to a *golden image* of your own instead of
+> carrying that setup over by hand:
+>
+> ```bash
+> npx agent-dev-env stop ubuntu-vmware
+> WORKDIR="$HOME/Library/Application Support/agent-dev-env/ubuntu-vmware/sandbox-ubuntu-24-04-arm64-vmware/working/default-agent-dev-env"
+> ( cd "$WORKDIR" && tar -czf "$HOME/sandbox-ubuntu-golden.tar.gz" *.vmx *.nvram *.vmdk )
+> UBUNTU_VMWARE_IMAGE="$HOME/sandbox-ubuntu-golden.tar.gz" \
+>   npx agent-dev-env run ubuntu-vmware --reset
+> ```
+>
+> The archive must keep the layout the CLI extracts (the vmx and every
+> disk it references next to it — the same layout `deploy` publishes), so
+> pack the whole working directory. The `--reset` drops the current
+> working clone first; the CLI then extracts your golden as the new
+> pristine base and clones a fresh working VM from it — without `--reset`
+> it asks whether to drop the working instances instead (default no).
 
 ### Desktop
 
@@ -238,31 +265,50 @@ The image is built with [Packer](https://www.packer.io/)'s VMware plugin
 [images/ubuntu-arm64-vmware/README.md](../images/ubuntu-arm64-vmware/README.md))
 and runs under Fusion via `vmrun`. It ships:
 
-| Component | Detail |
+| Software | Version (default image) |
 | --- | --- |
-| Ubuntu Server 24.04 LTS (ARM64) | Point release from the vars file; LVM over the whole disk |
-| open-vm-tools | From the Ubuntu archive (Fusion ships no Linux tools for arm64); enables guest IP discovery, soft power ops, shared folders |
-| apt toolchain | build-essential (gcc/g++/make), cmake, git, curl, wget, jq, ripgrep, vim, tmux, socat, python3 + pip/venv, ruby |
-| Go, Rust, Node.js | Hash-pinned Go tarball, rustup (arm64 host toolchain), nvm (Node from the vars file) |
-| GitHub CLI, VS Code, Firefox | Pinned debs / official linux-aarch64 tarball; all three are desktop apps now (no Chrome — CfT publishes no linux-arm64 build) |
-| GNOME desktop | `ubuntu-desktop-minimal` (GNOME Shell + GDM3 + core apps) + `open-vm-tools-desktop` (SVGA Xorg driver, clipboard, drag-and-drop); boots to `graphical.target`, GDM3 auto-login as `admin`, Xorg session (software rendering — no GPU accel under Fusion) |
-| Docker CLI | Client only (`docker` + `docker compose` + `docker buildx`), remote engine via the host bridge |
-| OpenCode (`opencode-ai`) | npm global |
-| OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
-| OpenChamber web UI | npm global (`@openchamber/web`), systemd user service on `0.0.0.0:4000`, started at boot |
+| Ubuntu Server | 24.04 LTS (ARM64), point release from the vars file; LVM over the whole disk |
+| open-vm-tools | Ubuntu archive (Fusion ships no Linux tools for arm64); guest IP discovery, soft power ops, shared folders |
+| GNU toolchain | build-essential (gcc/g++/make), `cmake`, `ninja-build`, autoconf/automake, pkg-config — Ubuntu archive |
+| CLI tools | `git` + LFS, `curl`, `wget`, `jq`, `ripgrep`, `vim`, `tmux`, `socat`, `xz-utils`, unzip/zip — Ubuntu archive |
+| Python | 3.12 (`python3.12` + pip/venv, from the Ubuntu archive) |
+| Ruby | Ubuntu archive (`ruby` + `ruby-dev`; `rbenv` for project-pinned interpreters) |
+| Go | 1.27.0 (go.dev/dl tarball, hash-pinned, `/usr/local/go`) |
+| Rust | 1.95 (rustup, arm64 host toolchain) |
+| Java | 17 (OpenJDK from the archive; `JAVA_HOME` exported via `/etc/profile.d`) |
+| Gradle | 8.7 (bin zip hash-pinned to `/opt/gradle`; wrapper distribution pre-cached in `~/.gradle`) |
+| Kotlin/Native | Not available — JetBrains publishes no linux-aarch64 prebuilt (macOS x86_64/aarch64 and Linux x86_64 only) |
+| Android SDK | `/opt/android-sdk` (cmdline-tools hash-pinned): platform-tools, platforms;android-36, build-tools;36.0.0, NDK 28.2 + `ndk;29.0.14206865` / `build-tools;34.0.0` pre-installed |
+| Node.js + npm | 26 (via nvm); npm globals: `pnpm`, `yarn` |
+| GitHub CLI | 2.98.0 (linux-arm64 deb, hash-pinned) |
+| Visual Studio Code | 1.134.0 (arm64 deb, hash-pinned; `code` on PATH) |
+| Firefox | 154.0 (linux-aarch64 tarball, hash-pinned; no Chrome — CfT publishes no linux-arm64 build) |
+| Docker CLI | 29.7.2 + `docker compose` 5.5.0 + `docker buildx` 0.36.1 (static aarch64 binaries; client only — remote engine via the host bridge) |
+| OpenCode | latest (official installer) |
+| OpenCodeReview (`ocr`) | 1.9.5 (npm global) |
+| OpenChamber web UI | latest (npm global, systemd user service on `0.0.0.0:4000`, started at boot) |
+| OpenChamber desktop app | 1.22.0 (linux-arm64 AppImage, hash-pinned; launch as `openchamber-desktop` or via the GNOME app menu) |
+| GNOME desktop | `ubuntu-desktop-minimal` + `open-vm-tools-desktop`; boots to `graphical.target`, GDM3 auto-login as `admin`, Xorg session (software rendering — no GPU accel under Fusion) |
 | SSH | openssh-server with password auth; `admin`/sandbox1 (see the vars file) |
+| Image identity | `~/.config/agent-dev-env/image.json` (image name + `image_version`, baked at build time) |
 
 Verify the toolchain over SSH (`ssh admin@<guest-ip>`, password `sandbox1`):
 
 ```bash
 node --version && npm --version
+pnpm --version && yarn --version
 python3 --version
+rbenv --version
 git --version
+git lfs version
 gh --version
 rg --version
 jq --version
 go version
 rustc --version && cargo --version
+java -version
+gradle --version
+ninja --version
 code --version
 opencode --version
 ocr --version
@@ -333,9 +379,13 @@ exposes the socket on TCP `4401` (bound to the host's vmnet8 address —
 reachable from the guest), and a guest-side systemd user service
 (`agent-dev-env-docker`) presents it as the Unix socket `/tmp/docker.sock`.
 `DOCKER_HOST` (and `TESTCONTAINERS_HOST_OVERRIDE` for clients that ignore
-it) is exported in `/etc/profile.d/agent-dev-env.sh`, and the docker
-context `host` points at the same socket, so `docker`, `docker compose`,
-and testcontainers all hit the host engine:
+it) is exported for every shell — `/etc/profile.d/agent-dev-env.sh` for
+login shells (when the agent runs as root) plus the sandbox user's
+`~/.profile` and `~/.bashrc` (login shells and the interactive terminals
+GNOME opens; a terminal never sources `~/.profile`, so `~/.bashrc` is what
+makes the bridges visible there) — and the docker context `host` points at
+the same socket, so `docker`, `docker compose`, and testcontainers all hit
+the host engine:
 
 ```bash
 # inside the guest — the CLI already set up the socket
@@ -408,6 +458,57 @@ nothing is shared. Notes:
   `sudo vmhgfs-fuse .host:/ /mnt/hgfs -o allow_other`.
 - The share is read/write. Use git, or the OpenChamber UI as the
   alternative transport.
+
+> [!TIP]
+> To keep opencode's history and state between different sandboxes — the
+> data directories are per-VM, so a deleted or cloned VM starts fresh —
+> store them in the shared workdir:
+>
+> 1. Create directories for opencode and openchamber data in the shared
+>    workdir (`/mnt/hgfs/work` is the guest side of the mount):
+>
+>    ```bash
+>    mkdir -p /mnt/hgfs/work/data/opencode /mnt/hgfs/work/data/openchamber
+>    ```
+>
+> 2. In the guest's `~/.profile` *and* `~/.bashrc` (login shells and the
+>    interactive terminals GNOME opens; a terminal never sources
+>    `~/.profile`, so `~/.bashrc` is what makes the vars visible there),
+>    export the data directories and the opencode binary path — once per
+>    new VM:
+>
+>    ```bash
+>    # OpenChamber
+>    export OPENCHAMBER_DATA_DIR="/mnt/hgfs/work/data/openchamber"
+>    export OPENCODE_BINARY="$HOME/.opencode/bin/opencode"
+>    export OPENCODE_DATA_DIR="/mnt/hgfs/work/data/opencode"
+>    ```
+>
+>    The exports alone are not enough: OpenChamber runs as the systemd
+>    user service `agent-dev-env-openchamber`, and systemd never reads
+>    shell profiles — the image's unit pins its own environment. Add the
+>    data directories with a drop-in override:
+>
+>    ```bash
+>    systemctl --user edit agent-dev-env-openchamber
+>    ```
+>
+>    then add (under `[Service]`):
+>
+>    ```ini
+>    Environment=OPENCHAMBER_DATA_DIR=/mnt/hgfs/work/data/openchamber
+>    Environment=OPENCODE_DATA_DIR=/mnt/hgfs/work/data/opencode
+>    ```
+>
+>    and restart the service:
+>
+>    ```bash
+>    systemctl --user restart agent-dev-env-openchamber
+>    ```
+>
+>    The drop-in survives `agent-dev-env sync ubuntu-vmware` and runner
+>    restarts (`systemctl` drop-ins are only read, never rewritten — the
+>    `OPENCODE_BINARY` pin from the unit stays intact).
 
 ### User settings on the guest
 
@@ -509,8 +610,10 @@ package (`assets/rules/agent-rules-linux.md`) and explains the runtime
 topology: the shared-directory path mapping (host paths vs
 `/mnt/hgfs/work`), the Docker remote-engine bridge (host paths in bind
 mounts, published ports at the NAT gateway), and the SSH agent socket.
-Files the user edited are never overwritten without a separate
-confirmation.
+When a host-level global `~/.config/opencode/AGENTS.md` exists, it is
+merged on top of the installed file: the host's global instructions come
+first, then the sandbox rules behind a `---` separator. Files the user
+edited are never overwritten without a separate confirmation.
 
 ### CLI reference
 

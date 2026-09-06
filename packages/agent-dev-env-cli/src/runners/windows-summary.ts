@@ -5,8 +5,9 @@
 
 import { existsSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
-import { imageRootDir, workingVmxPath } from '../lib/paths.js';
+import { instanceDir, workingVmxPath } from '../lib/paths.js';
 import { PLATFORM_DEFAULTS } from '../lib/platform.js';
+import { cloneSourceLine } from '../lib/provenance.js';
 import type { RunContext, RunState } from './framework.js';
 import { resolveGuestCredentials } from './windows-guest.js';
 
@@ -17,8 +18,8 @@ import { resolveGuestCredentials } from './windows-guest.js';
  * @param state - The accumulated run state.
  */
 export async function printWindowsSummary(context: RunContext, state: RunState): Promise<void> {
-  const workVmx = workingVmxPath(context.platform, context.image);
-  const stateDir = imageRootDir(context.platform, context.image);
+  const workVmx = workingVmxPath(context.platform, context.image, context.instance);
+  const stateDir = instanceDir(context.platform, context.image, context.instance);
   const defs = PLATFORM_DEFAULTS['windows-vmware'];
   const creds = state.vmIp
     ? resolveGuestCredentials(context.image, context.options.env, state.vmIp)
@@ -26,6 +27,7 @@ export async function printWindowsSummary(context: RunContext, state: RunState):
 
   logger.step('Sandbox is ready');
   summaryLine('Image:', state.imageArchive ?? 'not available');
+  summaryLine('Image source:', cloneSourceLine(context.platform, context.image, context.instance));
   summaryLine('VM:', workVmx);
   summaryLine('Guest IP:', state.vmIp ? `${state.vmIp} (Fusion NAT, vmnet8)` : 'unavailable');
   summaryLine(
@@ -39,8 +41,9 @@ export async function printWindowsSummary(context: RunContext, state: RunState):
   summaryLine('WinRM:', `${state.vmIp ?? '?'}:${defs.winrmPort ?? 5985} (advanced use)`);
   printSharedLine(context, state);
   printBridgeLines(context, state);
+  printSettingsLine(state.settings);
   printOpenchamberLine(context, state);
-  summaryLine('State:', `${stateDir} (extracted base + working clone; --reset re-clones)`);
+  summaryLine('State:', `${stateDir} (working instance; --reset re-clones)`);
   printStopLines(context, state, workVmx);
 }
 
@@ -98,6 +101,31 @@ function printBridgeLines(context: RunContext, state: RunState): void {
     }
   } else {
     summaryLine('Docker:', 'not bridged');
+  }
+}
+
+function printSettingsLine(settings: RunState['settings']): void {
+  switch (settings) {
+    case 'copied':
+      summaryLine('Settings:', loggerOk('host user settings copied into the guest'));
+      break;
+    case 'uptodate':
+      summaryLine('Settings:', 'already in the guest');
+      break;
+    case 'skipped':
+      summaryLine('Settings:', 'not copied (--no-settings)');
+      break;
+    case 'declined':
+      summaryLine('Settings:', 'not copied (declined)');
+      break;
+    case 'none':
+      summaryLine('Settings:', 'no host settings found');
+      break;
+    case 'failed':
+      summaryLine('Settings:', loggerWarn('copy failed — re-run to retry'));
+      break;
+    default:
+      summaryLine('Settings:', 'not copied');
   }
 }
 

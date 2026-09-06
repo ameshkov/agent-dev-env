@@ -11,8 +11,8 @@
 //
 // The /etc/profile.d env script needs root: run `install` once through
 // sudo (`sudo -S node guest-agent-ubuntu.js install …`) or the agent
-// writes the user-level exports to ~/.profile instead and reports the
-// difference.
+// writes the user-level exports to ~/.profile (login shells) and
+// ~/.bashrc (interactive terminals) instead and reports the difference.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -123,21 +123,51 @@ function install(argv: string[]): number {
   return 0;
 }
 
-/** /etc/profile.d when root; otherwise the user's ~/.profile (report). */
+/** The files the bridge env block must land in:
+ *  - root: /etc/profile.d (every login shell) + the sudo caller's
+ *    ~/.bashrc (interactive terminals),
+ *  - the sandbox user: ~/.profile (login shells — ssh sessions) and
+ *    ~/.bashrc (the interactive non-login shells the GNOME Terminal
+ *    opens; a terminal never sources ~/.profile, so without ~/.bashrc
+ *    the bridges would be invisible there — SSH would fall back to key
+ *    files and fail with "Permission denied (publickey)").
+ *
+ * @internal — exported for the co-located unit tests.
+ *
+ * @param isRoot - Whether the agent runs as uid 0.
+ * @param home - The invoker's home.
+ * @param sudoUser - The sudo caller (`SUDO_USER`) when root.
+ * @returns The files the env block must land in, in write order.
+ */
+export function envBlockTargets(isRoot: boolean, home: string, sudoUser?: string): string[] {
+  if (isRoot) {
+    return [PROFILE_D_PATH, ...(sudoUser ? [`/home/${sudoUser}/.bashrc`] : [])];
+  }
+  return [join(home, '.profile'), join(home, '.bashrc')];
+}
+
+/** /etc/profile.d when root; otherwise the user's ~/.profile and
+ *  ~/.bashrc (login + interactive shells; see envBlockTargets). */
 function installProfileExports(gw: string): void {
-  if (typeof process.getuid === 'function' && process.getuid() === 0) {
-    writeFileSync(PROFILE_D_PATH, profileDScript(gw));
-    process.stdout.write(`installed:profile.d (${PROFILE_D_PATH})\n`);
-    return;
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  const block = profileDScript(gw);
+  for (const target of envBlockTargets(isRoot, HOME, isRoot ? process.env.SUDO_USER : undefined)) {
+    if (target === PROFILE_D_PATH) {
+      writeFileSync(PROFILE_D_PATH, block);
+      process.stdout.write(`installed:profile.d (${PROFILE_D_PATH})\n`);
+    } else {
+      appendEnvBlock(target, block);
+      process.stdout.write(`installed:profile.d (user ${target})\n`);
+    }
   }
-  const profile = join(HOME, '.profile');
-  const content = readMaybe(profile);
+}
+
+/** Appends the marker-guarded env block when it is not present yet. */
+function appendEnvBlock(path: string, block: string): void {
+  const content = readMaybe(path);
   if (!content.includes(profileMarker())) {
-    writeFileSync(profile, `${content}${profileDScript(gw)}`);
+    writeFileSync(path, `${content}${block}`);
   }
-  process.stdout.write(
-    `installed:profile.d (user ~/.profile; run install via sudo for ${PROFILE_D_PATH})\n`,
-  );
 }
 
 function profileMarker(): string {
@@ -195,14 +225,21 @@ function uninstall(): number {
     }
     rmSync(join(UNIT_DIR, unit), { force: true });
   }
-  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  if (isRoot) {
     rmSync(PROFILE_D_PATH, { force: true });
   }
-  const profile = join(HOME, '.profile');
-  if (existsSync(profile)) {
-    const cleaned = removeProfileBlock(readMaybe(profile));
-    if (cleaned !== readMaybe(profile)) {
-      writeFileSync(profile, cleaned);
+  const rcFiles = isRoot
+    ? process.env.SUDO_USER
+      ? [`/home/${process.env.SUDO_USER}/.bashrc`]
+      : []
+    : [join(HOME, '.profile'), join(HOME, '.bashrc')];
+  for (const rcFile of rcFiles) {
+    if (existsSync(rcFile)) {
+      const cleaned = removeProfileBlock(readMaybe(rcFile));
+      if (cleaned !== readMaybe(rcFile)) {
+        writeFileSync(rcFile, cleaned);
+      }
     }
   }
   process.stdout.write('uninstalled:ssh-agent,docker\n');

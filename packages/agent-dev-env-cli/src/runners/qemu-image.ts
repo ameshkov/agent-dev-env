@@ -16,6 +16,12 @@ import { logger } from '../lib/logger.js';
 import { buildDir } from '../lib/paths.js';
 import { confirmDefault } from '../lib/prompt.js';
 import {
+  clearCloneRecord,
+  recordClone,
+  resolveRegistryDigest,
+  writeImageRecord,
+} from '../lib/provenance.js';
+import {
   backingIdentity,
   QEMU_EFI_VARS_TEMPLATE,
   qemuBackingMarker,
@@ -23,6 +29,7 @@ import {
   qemuImagePath,
   qemuOverlayPath,
   qemuTpmDir,
+  qemuWorkingDir,
 } from '../lib/qemu.js';
 import type { RunContext, RunState } from './framework.js';
 
@@ -105,6 +112,13 @@ async function pullQemuImage(context: RunContext, cached: string): Promise<strin
   if (!existsSync(cached)) {
     logger.die(`oras pull produced no ${cached} — is the image published under ${ref}?`);
   }
+  const digest = await resolveRegistryDigest(ref);
+  writeImageRecord({
+    platform: 'windows-qemu',
+    image: context.image,
+    registryRef: ref,
+    digest,
+  });
   return cached;
 }
 
@@ -119,24 +133,36 @@ async function pullQemuImage(context: RunContext, cached: string): Promise<strin
  */
 async function ensureWorkingVm(context: RunContext, pristinePath: string): Promise<void> {
   const image = context.image;
-  const overlay = qemuOverlayPath(image);
+  const instance = context.instance;
+  const overlay = qemuOverlayPath(image, instance);
   const stat = statSync(pristinePath);
   const id = backingIdentity(pristinePath, stat.size, stat.mtimeMs);
 
-  if (backingChanged(image, id)) {
+  if (backingChanged(image, instance, id)) {
     logger.warn('The backing image changed (new build or pull) — recreating the working VM.');
     logger.warn(
       'Discarding the old overlay, EFI NVRAM, and TPM state (they belong to the previous image).',
     );
-    dropWorkingVmState(image);
+    dropWorkingVmState(image, instance);
   }
-  if (existsSync(overlay) && readMarker(image) === id) {
+  if (existsSync(overlay) && readMarker(image, instance) === id) {
+    recordClone({
+      platform: 'windows-qemu',
+      image,
+      instance,
+      vm: overlay,
+      type: 'qcow2',
+      name: pristinePath,
+      baseIdentity: id,
+      backfilled: true,
+      clonedAt: new Date(statSync(overlay).mtimeMs).toISOString(),
+    });
     logger.ok(`Working VM exists (${overlay}).`);
     return;
   }
 
-  await createOverlay(image, pristinePath, overlay, id);
-  await seedEfivars(image, pristinePath);
+  await createOverlay(image, instance, pristinePath, overlay, id);
+  await seedEfivars(image, instance, pristinePath);
   logger.ok(`Working VM created (${overlay}).`);
 }
 
@@ -144,8 +170,8 @@ async function ensureWorkingVm(context: RunContext, pristinePath: string): Promi
  *  (a rebuild replaces the file at the same path — path alone would
  *  silently stack the old overlay on a different base, a corrupt disk).
  */
-function backingChanged(image: string, id: string): boolean {
-  const markerPath = qemuBackingMarker(image);
+function backingChanged(image: string, instance: string, id: string): boolean {
+  const markerPath = qemuBackingMarker(image, instance);
   if (!existsSync(markerPath)) {
     return false;
   }
@@ -153,31 +179,32 @@ function backingChanged(image: string, id: string): boolean {
 }
 
 /** The recorded backing identity ('' when the marker is missing). */
-function readMarker(image: string): string {
-  const markerPath = qemuBackingMarker(image);
+function readMarker(image: string, instance: string): string {
+  const markerPath = qemuBackingMarker(image, instance);
   return existsSync(markerPath) ? readFileSync(markerPath, 'utf8').trim() : '';
 }
 
 /** Removes the overlay + EFI NVRAM + TPM state that belong to the previous
- *  backing image.
+ *  backing image (the clone record goes with them).
  */
-function dropWorkingVmState(image: string): void {
-  rmSync(qemuOverlayPath(image), { force: true });
-  rmSync(qemuEfivarsPath(image), { force: true });
-  rmSync(qemuTpmDir(image), { recursive: true, force: true });
+function dropWorkingVmState(image: string, instance: string): void {
+  rmSync(qemuWorkingDir(image, instance), { recursive: true, force: true });
+  clearCloneRecord('windows-qemu', image, instance);
 }
 
 /** Creates the COW overlay over the pristine disk (qemu-img create) and
- *  records the backing identity it was created from.
+ *  records both the backing identity and the clone provenance it was
+ *  created from.
  */
 async function createOverlay(
   image: string,
+  instance: string,
   pristinePath: string,
   overlay: string,
   id: string,
 ): Promise<void> {
   mkdirSync(dirname(overlay), { recursive: true });
-  mkdirSync(qemuTpmDir(image), { recursive: true });
+  mkdirSync(qemuTpmDir(image, instance), { recursive: true });
   logger.cmd(`qemu-img create -f qcow2 -F qcow2 -b ${pristinePath} ${overlay}`);
   const create = await run('qemu-img', [
     'create',
@@ -192,7 +219,16 @@ async function createOverlay(
   if (create.code !== 0) {
     logger.die(`qemu-img create failed:\n${create.stderr.trim()}`);
   }
-  writeFileSync(qemuBackingMarker(image), id);
+  writeFileSync(qemuBackingMarker(image, instance), id);
+  recordClone({
+    platform: 'windows-qemu',
+    image,
+    instance,
+    vm: overlay,
+    type: 'qcow2',
+    name: pristinePath,
+    baseIdentity: id,
+  });
 }
 
 /** Seeds the EFI NVRAM store: the vars file the image was built with (it
@@ -201,8 +237,8 @@ async function createOverlay(
  *  Boot0000 and relies on the \EFI\BOOT\bootaa64.efi fallback the
  *  installer writes).
  */
-async function seedEfivars(image: string, pristinePath: string): Promise<void> {
-  const efivars = qemuEfivarsPath(image);
+async function seedEfivars(image: string, instance: string, pristinePath: string): Promise<void> {
+  const efivars = qemuEfivarsPath(image, instance);
   if (existsSync(efivars)) {
     return;
   }

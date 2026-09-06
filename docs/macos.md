@@ -71,10 +71,12 @@ and copies your user settings in once per VM (see
 [User settings on the guest](#user-settings-on-the-guest)).
 
 A window opens and auto-logs in as `admin` (`admin`); clipboard sharing
-works. Pass `--foreground` to keep the terminal attached (Cmd+C stops the
-VM), `--headless` to run without a window, `--no-agent` to skip the SSH
-agent bridge, `--no-docker` to skip the Docker bridge, or `--no-settings` to
-skip the settings copy.
+works. Every run restarts the Tart guest agent on boot, so the vdagent
+clipboard link is re-established even when it went stale across previous
+VM stop/start cycles. Pass `--foreground` to keep the terminal attached
+(Cmd+C stops the VM), `--headless` to run without a window, `--no-agent`
+to skip the SSH agent bridge, `--no-docker` to skip the Docker bridge, or
+`--no-settings` to skip the settings copy.
 
 > [!NOTE]
 > While the VM window is focused, system shortcuts — Cmd+Space (Spotlight),
@@ -103,7 +105,7 @@ Two environment variables cover most needs (the full list is in the
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `SANDBOX_WORK_DIR` | `/Volumes/dev` | Host directory shared into the guest; empty disables the mount |
-| `SANDBOX_VM` | `sandbox-macos` | Name of the working VM — set it to run several sandboxes side by side |
+| `SANDBOX_VM` | `default-agent-dev-env` | Sandbox instance name — also the Tart working VM name; set it to run several sandboxes side by side |
 
 For example, a separate sandbox for one project:
 
@@ -192,9 +194,11 @@ in an isolated sandbox, with your code safely on the host.
 
   This stops the working VM (`tart stop`, graceful with a force fallback)
   and the host SSH agent / Docker bridge listeners the runner left up — a
-  bare `tart stop` would leave the bridge listeners running. `sandbox-macos`
-  is the default working VM name (override with `SANDBOX_VM`; `stop` honors
-  the same `SANDBOX_AGENT_PORT` / `SANDBOX_DOCKER_PORT` overrides). If the
+  bare `tart stop` would leave the bridge listeners running.
+  `default-agent-dev-env` is the default instance name (the Tart working
+  VM name; override with
+  `SANDBOX_VM`; `stop` honors the same `SANDBOX_AGENT_PORT` /
+  `SANDBOX_DOCKER_PORT` overrides). If the
   guest hangs, `tart stop` force-terminates it after a timeout; `stop`
   passes none, so wait longer manually with
   `tart stop <vm> --timeout <seconds>`. Start it again with
@@ -214,6 +218,29 @@ in an isolated sandbox, with your code safely on the host.
   `--yes` to delete it too. Options are the same `SANDBOX_VM` /
   `SANDBOX_IMAGE` overrides as `run`.
 
+> [!TIP]
+> Once a sandbox is configured the way you like it (installed tools,
+> provider login, VS Code extensions — everything the working VM
+> accumulated), promote it to a *golden image* of your own instead of
+> carrying that setup over by hand:
+>
+> ```bash
+> tart stop default-agent-dev-env
+> tart clone default-agent-dev-env my-sandbox-golden
+> ```
+>
+> The clone is a regular Tart VM. Use it as the runner's pristine image:
+>
+> ```bash
+> SANDBOX_IMAGE=my-sandbox-golden agent-dev-env run macos
+> ```
+>
+> The runner clones the working VM from it and never pulls GHCR when the
+> image VM is present. Keep the golden VM stopped — the runner refuses to
+> clone a running image — and re-promote it any time the working VM gains
+> useful state (`tart clone` again over the old golden). To share it with
+> other machines, `tart push my-sandbox-golden <repo>` once.
+
 ---
 
 ## Details
@@ -227,12 +254,21 @@ with Tart. The default image ships the following software:
 | Software | Version (default image) |
 | --- | --- |
 | macOS | 26 (Tahoe) |
-| Xcode | 26.4.1 (+ Command Line Tools) |
+| Xcode | 26.5 (+ Command Line Tools) |
 | Homebrew | latest |
-| Node.js + npm | 26 (via nvm) |
+| Node.js + npm | 26 (via nvm; npm globals: `pnpm`, `yarn`) |
 | nvm | latest (Node.js version manager) |
 | Python | 3.14 (`python`, `python3`, `pip`, `pip3` aliases) |
-| Ruby | latest (brew) |
+| Ruby | latest (brew; `rbenv` for project-pinned interpreters) |
+| Go | latest (brew) |
+| Rust | pinned toolchain (rustup; aarch64/x86_64 macOS + iOS targets) |
+| Java | 17.0.11-oracle (SDKMAN; `JAVA_HOME` exported) |
+| Flutter | 3.38.3 (base image checkout at `$FLUTTER_HOME`, precached) |
+| Gradle | 8.7 (wrapper distribution pre-cached in `~/.gradle`) |
+| Kotlin/Native | 1.9.24 (pre-cached in `~/.konan`) |
+| Android SDK | base image (platform-tools, platforms;android-36, build-tools;36.0.0, NDK 28.2, licenses accepted) + `ndk;29.0.14206865` and `build-tools;34.0.0` pre-installed |
+| CMake / Ninja | latest (brew) |
+| Swift tooling | `xcodegen`, `swiftlint`, `periphery` (brew) |
 | Visual Studio Code | latest (+ `code` CLI) |
 | Sublime Text | latest (stable, + `subl` CLI) |
 | Google Chrome | latest (universal) |
@@ -242,7 +278,9 @@ with Tart. The default image ships the following software:
 | OpenChamber | latest (web UI for OpenCode, auto-started on port 4000) |
 | OpenChamber desktop app | latest (native macOS app, `/Applications/OpenChamber.app`) |
 | Docker CLI | latest (`docker` + `docker compose` / `docker buildx` plugins; client only — no local engine, see [Docker (remote engine)](#docker-remote-engine)) |
-| CLI tools | `git`, `gh`, `jq`, `ripgrep`, `coreutils`, `curl`, `wget`, `socat`, `bash` |
+| CLI tools | `git` + `git-lfs`, `gh`, `jq`, `ripgrep`, `coreutils`, `curl`, `wget`, `socat`, `bash` |
+| Global git config | git-lfs filters, legacy `ssh-rsa` key types, CocoaPods specs repo blocked (`insteadOf`) |
+| Image identity | `~/.config/agent-dev-env/image.json` (image name + `image_version`, baked at build time) |
 
 Verify the toolchain from the guest Terminal (or over SSH:
 `ssh admin@$(tart ip <vm-name>)`, password `admin`):
@@ -251,9 +289,22 @@ Verify the toolchain from the guest Terminal (or over SSH:
 xcodebuild -version
 brew --version
 node --version && npm --version
+pnpm --version && yarn --version
 nvm --version
 python3 --version
 ruby --version
+rbenv --version
+go version
+rustc --version && cargo --version
+java -version
+flutter --version
+gradle --version
+cmake --version
+ninja --version
+xcodegen --version
+swiftlint --version
+periphery version
+git lfs version
 code --version
 subl --version
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
@@ -465,6 +516,48 @@ Notes:
 - If the sandbox gets messy: `tart stop sandbox && tart delete sandbox`, then
   re-clone from the pristine image. All your code stays safe on the host.
 
+> [!TIP]
+> To keep opencode's history and state between different sandboxes — the
+> data directories are per-VM, so a deleted or cloned VM starts fresh —
+> store them in the shared workdir:
+>
+> 1. Create directories for opencode and openchamber data in your shared
+>    workdir:
+>
+>    ```bash
+>    mkdir -p /Volumes/dev/data/opencode /Volumes/dev/data/openchamber
+>    ```
+>
+>    (`/Volumes/dev` is the host side of the default mount; use the host path
+>    of your own `--work-dir`.)
+>
+> 2. In the guest's `~/.zprofile`, export the data directories (and the
+>    opencode binary path) — once per new VM:
+>
+>    ```bash
+>    # OpenChamber
+>    export OPENCHAMBER_DATA_DIR="/Volumes/My Shared Files/dev/data/openchamber"
+>    export OPENCODE_BINARY="/opt/homebrew/bin/opencode"
+>    export OPENCODE_DATA_DIR="/Volumes/My Shared Files/dev/data/opencode"
+>    ```
+>
+>    The exports alone are not enough: OpenChamber runs as the launchd
+>    service `dev.openchamber.web`, and launchd never reads shell
+>    profiles. `openchamber startup enable` snapshots the environment
+>    into the service's LaunchAgent — the runner re-snapshots it
+>    (sourcing `~/.zprofile` first) whenever it restarts OpenChamber
+>    after a settings copy and on `agent-dev-env sync macos`. To
+>    re-snapshot by hand:
+>
+>    ```bash
+>    openchamber startup disable
+>    openchamber startup enable --port 4000 --lan --ui-password 'sandbox'
+>    ```
+>
+>    (keep the `--ui-password` — this is also the change-password pattern
+>    from [OpenChamber from the host](#openchamber-from-the-host); pass
+>    the same port as `SANDBOX_OPENCHAMBER_PORT` when you override it.)
+
 ### User settings on the guest
 
 On first run — and again whenever the settings change — the runner offers to
@@ -522,8 +615,8 @@ for confirmation unless you pass `--yes`, and restarts OpenChamber so the
 new settings take effect. The VM must be running — start it with
 `npx agent-dev-env run macos` first if it isn't. A sync also updates the
 guest's version marker, so `run` won't re-offer the copy on its next run.
-Like the runner, sync honors `SANDBOX_VM` (default `sandbox-macos`) — use
-it to sync a non-default sandbox:
+Like the runner, sync honors `SANDBOX_VM` (default
+`default-agent-dev-env`) — use it to sync a non-default sandbox:
 
 ```bash
 SANDBOX_VM=my-project npx agent-dev-env sync macos --yes
@@ -567,6 +660,13 @@ of `localhost`, volume mounts needing host paths), the shared-directory path
 mapping and the SSH agent bridge. The content ships inside the npm package
 (`assets/rules/agent-rules.md`).
 
+When you have a host-level global `~/.config/opencode/AGENTS.md`, it is
+merged on top of the installed file: the host's global instructions come
+first, then the sandbox rules behind a `---` separator. The guest copy is
+therefore *host global AGENTS.md + sandbox rules* (the only exception is
+when you edited the guest's copy yourself — the runner asks instead of
+overwriting it).
+
 Notes:
 
 - The rules are refreshed on every run, but the runner always asks before
@@ -585,8 +685,9 @@ Notes:
 [`agent-dev-env run macos`](cli.md) is the automated way to pull, run, and
 wire up the sandbox. Everything it accepts — the full option list and the
 environment variable table — is in [the CLI reference](cli.md); the
-defaults: image `sandbox-macos-tahoe`, working VM `sandbox-macos`, agent
-bridge port `4100`, Docker bridge port `4101`, 8 CPUs / 16 GB. Logs land in
+defaults: image `sandbox-macos-tahoe`, instance `default-agent-dev-env`
+(the Tart working VM name), agent bridge port `4100`, Docker bridge port
+`4101`, 8 CPUs / 16 GB. Logs land in
 `~/Library/Logs/agent-dev-env/tart-<vm>.log`.
 
 ## Building your own images

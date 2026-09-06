@@ -4,7 +4,8 @@
 // the guest is reached through the hostfwd forwards on 127.0.0.1, the
 // one-time auto-logon (windows-autologon.ts) so OpenChamber fires at
 // boot, the hostfwd bridges + the same guest agent wiring over ssh2
-// (windows-bridges.ts / windows-guest.ts) and the summary. Port of
+// (windows-bridges.ts / windows-guest.ts), the user settings copy
+// (settings/windows-copy.ts) and the summary. Port of
 // run-windows-qemu-sandbox.sh §steps 0-5.
 
 import { rmSync } from 'node:fs';
@@ -18,14 +19,15 @@ import {
   QEMU_EFI_CODE,
   qemuEfivarsPath,
   qemuOverlayPath,
-  qemuStateDir,
+  qemuWorkingDir,
   requireQemu,
   startSwtpm,
   stopQemu,
   stopSwtpm,
   swtpmSockPath,
 } from '../lib/qemu.js';
-import { probeSshd, waitForSshd, type SshCredentials } from '../lib/ssh.js';
+import { openSshSession, probeSshd, waitForSshd, type SshCredentials } from '../lib/ssh.js';
+import { ensureUserSettings, restartOpenchamber } from '../settings/windows-copy.js';
 import type { RunContext, RunState, SandboxBackend } from './framework.js';
 import { ensureBridgeDir } from './bridges.js';
 import { offerOpenInBrowser, waitForOpenchamber } from './openchamber.js';
@@ -56,9 +58,9 @@ async function preflight(context: RunContext): Promise<void> {
   requireQemu();
   ensureBridgeDir();
   if (context.options.reset) {
-    const root = qemuStateDir(context.image);
+    const root = qemuWorkingDir(context.image, context.instance);
     logger.info(
-      'Resetting the working VM (--reset) — deleting the overlay, TPM state, and EFI NVRAM.',
+      `Resetting the working VM (--reset) — deleting the overlay, TPM state, and EFI NVRAM of instance '${context.instance}'.`,
     );
     rmSync(root, { recursive: true, force: true });
   }
@@ -68,12 +70,12 @@ async function preflight(context: RunContext): Promise<void> {
 
 async function boot(context: RunContext, state: RunState): Promise<void> {
   await stopRunningQemu(context);
-  await startSwtpm(context.image);
+  await startSwtpm(context.image, context.instance);
   const args = buildQemuArgs({
     efiCode: QEMU_EFI_CODE,
-    efivars: qemuEfivarsPath(context.image),
-    overlay: qemuOverlayPath(context.image),
-    tpmSock: swtpmSockPath(context.image),
+    efivars: qemuEfivarsPath(context.image, context.instance),
+    overlay: qemuOverlayPath(context.image, context.instance),
+    tpmSock: swtpmSockPath(context.image, context.instance),
     sshPort: context.sshPort,
     rdpPort: context.rdpPort,
     openchamberPort: context.openchamberPort,
@@ -82,7 +84,7 @@ async function boot(context: RunContext, state: RunState): Promise<void> {
     memoryMb: context.memoryMb,
     headless: context.options.headless,
   });
-  state.qemuPid = await launchQemu(context.image, args);
+  state.qemuPid = await launchQemu(context.image, context.instance, args);
   const creds = resolveGuestCredentials(
     context.image,
     context.options.env,
@@ -99,7 +101,8 @@ async function boot(context: RunContext, state: RunState): Promise<void> {
  *  pidfile, since a previous run's qemu predates this run's state).
  */
 async function stopRunningQemu(context: RunContext): Promise<void> {
-  if (!isQemuAlive(context.image)) {
+  const { image, instance } = context;
+  if (!isQemuAlive(image, instance)) {
     return;
   }
   if (
@@ -110,7 +113,7 @@ async function stopRunningQemu(context: RunContext): Promise<void> {
   ) {
     logger.die(`aborted — the VM is already running. Stop it with: agent-dev-env stop ${PLATFORM}`);
   }
-  await stopQemu(context.image);
+  await stopQemu(image, instance);
   await sleep(1000);
 }
 
@@ -160,8 +163,34 @@ async function ensureQemuAutologon(context: RunContext, creds: SshCredentials): 
 // --- step 4/5 hooks ---------------------------------------------------------
 
 async function setupSettings(context: RunContext, state: RunState): Promise<void> {
-  logger.info('Windows guests have no user settings copy — skipping.');
-  state.settings = 'skipped';
+  if (context.options.noSettings) {
+    logger.info('Skipping user settings copy (--no-settings).');
+    state.settings = 'skipped';
+    return;
+  }
+  const creds = resolveGuestCredentials(
+    context.image,
+    context.options.env,
+    '127.0.0.1',
+    context.sshPort,
+  );
+  const session = await openSshSession(creds);
+  try {
+    state.settings = await ensureUserSettings(
+      session,
+      context.options.home,
+      context.options.yes,
+      creds.username,
+    );
+    if (state.settings === 'copied') {
+      await restartOpenchamber(session);
+    }
+  } catch (err) {
+    state.settings = 'failed';
+    logger.warn(`settings copy failed: ${(err as Error).message}`);
+  } finally {
+    session.end();
+  }
 }
 
 async function verifyOpenchamber(context: RunContext, state: RunState): Promise<void> {
@@ -184,7 +213,7 @@ async function finish(context: RunContext, state: RunState): Promise<void> {
   // they stay up, outliving the CLI by design.
   await cleanupRunBridge(state.bridges.agent.pid, 'agent bridge');
   await cleanupRunBridge(state.bridges.docker.pid, 'Docker bridge');
-  await stopSwtpm(context.image);
+  await stopSwtpm(context.image, context.instance);
 }
 
 /** The foreground wait: poll qemu until it exits; a Cmd+C stops it

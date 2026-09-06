@@ -80,9 +80,14 @@ describe('guest scripts', () => {
     expect(guestUnpackCommand()).toContain('chmod 700 "$HOME/.ssh"');
   });
 
-  it('the OpenChamber restart sources ~/.zprofile', () => {
-    const script = openchamberRestartScript();
+  it('the OpenChamber restart sources ~/.zprofile and re-snapshots the service env', () => {
+    const script = openchamberRestartScript(4000);
     expect(script).toContain('. "$HOME/.zprofile"');
-    expect(script).toContain('exec openchamber restart');
+    expect(script).toContain('openchamber startup disable');
+    expect(script).toContain('openchamber startup enable --port 4000 --lan --ui-password');
+    // A user-changed password must survive the re-snapshot: it is read
+    // back from the existing LaunchAgent plist, not replaced.
+    expect(script).toContain('plutil -extract EnvironmentVariables.OPENCHAMBER_UI_PASSWORD');
+    expect(script).not.toContain('exec openchamber restart');
   });
 });

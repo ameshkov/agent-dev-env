@@ -13,6 +13,7 @@ import { logger } from '../lib/logger.js';
 import { paths } from '../lib/paths.js';
 import { PLATFORM_DEFAULTS } from '../lib/platform.js';
 import { confirmDefault } from '../lib/prompt.js';
+import { clearCloneRecord } from '../lib/provenance.js';
 import {
   cloneVm,
   deleteVm,
@@ -32,6 +33,7 @@ import { ensureUserSettings, restartOpenchamber } from '../settings/macos-copy.j
 import type { RunContext, RunState, SandboxBackend } from './framework.js';
 import { ensureBridgeDir } from './bridges.js';
 import { macosBridges } from './macos-bridges.js';
+import { backfillMacosClone, recordMacosClone, recordMacosImagePull } from './macos-provenance.js';
 import { printMacosSummary } from './macos-summary.js';
 import { offerOpenInBrowser, waitForOpenchamber } from './openchamber.js';
 
@@ -49,6 +51,9 @@ export const macosBackend: SandboxBackend = {
   finish: finish,
 };
 
+/** The platform id of the macOS backend (provenance records). */
+const PLATFORM = 'macos' as const;
+
 async function preflight(context: RunContext): Promise<void> {
   if (!tartAvailable()) {
     logger.die("tart is not installed — run 'brew install cirruslabs/cli/tart' first.");
@@ -62,25 +67,27 @@ async function preflight(context: RunContext): Promise<void> {
 /** `--reset`: stop + delete the working VM so the next step re-clones it
  *  fresh (a "start over" without touching the pristine image). */
 async function teardownWorkingVm(context: RunContext): Promise<void> {
-  const { vm } = context;
-  if (!(await vmExists(vm))) {
+  const { instance } = context;
+  if (!(await vmExists(instance))) {
     return;
   }
-  if ((await vmState(vm)) === 'running') {
-    await stopVm(vm);
-    await waitForVmState(vm, 'stopped');
+  if ((await vmState(instance)) === 'running') {
+    await stopVm(instance);
+    await waitForVmState(instance, 'stopped');
   }
-  await deleteVm(vm);
-  logger.info(`Removed the working VM '${vm}' (--reset).`);
+  await deleteVm(instance);
+  clearCloneRecord(PLATFORM, context.image, instance);
+  logger.info(`Removed the working VM '${instance}' (--reset).`);
 }
 
 // --- step 1: image + working VM ---------------------------------------------
 
 async function ensureImageAndVm(context: RunContext, state: RunState): Promise<void> {
-  const { vm, image } = context;
+  const { instance, image } = context;
   const yes = context.options.yes;
-  if (await vmExists(vm)) {
-    logger.ok(`Working VM '${vm}' found (state: ${await vmState(vm)}).`);
+  if (await vmExists(instance)) {
+    backfillMacosClone(context);
+    logger.ok(`Working VM '${instance}' found (state: ${await vmState(instance)}).`);
     return;
   }
   if (await vmExists(image)) {
@@ -95,18 +102,19 @@ async function ensureImageAndVm(context: RunContext, state: RunState): Promise<v
   if ((await vmState(image)) === 'running') {
     logger.die(`image VM '${image}' is running — stop it first: tart stop ${image}`);
   }
-  const ask = `No working VM '${vm}' yet — clone it from the pristine image '${image}'?`;
+  const ask = `No working VM '${instance}' yet — clone it from the pristine image '${image}'?`;
   if (await confirmDefault(ask, { default: 'y', yes })) {
-    logger.cmd(`tart clone ${image} ${vm}`);
-    const res = await cloneVm(image, vm);
+    logger.cmd(`tart clone ${image} ${instance}`);
+    const res = await cloneVm(image, instance);
     if (res.code !== 0) {
       throw new Error(`tart clone failed:\n${res.stderr.trim()}`);
     }
+    await recordMacosClone(context);
     state.created = true;
-    logger.ok(`Cloned '${vm}' from '${image}'.`);
+    logger.ok(`Cloned '${instance}' from '${image}'.`);
   } else {
     logger.die(
-      `aborted — '${vm}' is required. Clone it manually with 'tart clone ${image} ${vm}'.`,
+      `aborted — '${instance}' is required. Clone it manually with 'tart clone ${image} ${instance}'.`,
     );
   }
 }
@@ -122,14 +130,15 @@ async function pullSandboxImage(context: RunContext): Promise<void> {
       'pull failed — check your network connection (public GHCR images pull without a login).',
     );
   }
+  await recordMacosImagePull(context);
 }
 
 // --- step 2: boot -----------------------------------------------------------
 
 async function boot(context: RunContext, state: RunState): Promise<void> {
-  if ((await vmState(context.vm)) === 'running') {
+  if ((await vmState(context.instance)) === 'running') {
     state.vmAlreadyRunning = true;
-    const ask = `VM '${context.vm}' is already running — restart it?`;
+    const ask = `VM '${context.instance}' is already running — restart it?`;
     if (await confirmDefault(ask, { default: 'n', yes: context.options.yes })) {
       await stopAndWait(context);
       await sleep(1000); // let tart release the VM lock before running it again
@@ -146,19 +155,19 @@ async function boot(context: RunContext, state: RunState): Promise<void> {
 }
 
 async function stopAndWait(context: RunContext): Promise<void> {
-  logger.cmd(`tart stop ${context.vm}`);
-  const stopped = await stopVm(context.vm);
+  logger.cmd(`tart stop ${context.instance}`);
+  const stopped = await stopVm(context.instance);
   if (stopped.code !== 0) {
-    logger.die(`'tart stop ${context.vm}' failed.`);
+    logger.die(`'tart stop ${context.instance}' failed.`);
   }
-  if (!(await waitForVmState(context.vm, 'stopped'))) {
-    logger.die(`timed out waiting for '${context.vm}' to stop.`);
+  if (!(await waitForVmState(context.instance, 'stopped'))) {
+    logger.die(`timed out waiting for '${context.instance}' to stop.`);
   }
-  logger.ok(`VM '${context.vm}' is stopped.`);
+  logger.ok(`VM '${context.instance}' is stopped.`);
 }
 
 async function applyRecommendedSettings(context: RunContext): Promise<void> {
-  const args = tartSetArgs(context.vm, context.cpuCount, context.memoryMb);
+  const args = tartSetArgs(context.instance, context.cpuCount, context.memoryMb);
   logger.cmd(`tart ${args.join(' ')}`);
   const res = await setVm(args);
   if (res.code !== 0) {
@@ -180,9 +189,12 @@ async function launchVm(context: RunContext, state: RunState): Promise<void> {
       `work directory '${workDir}' does not exist — skipping the shared-directory mount.`,
     );
   }
-  const args = tartRunArgs(context.vm, { headless: context.options.headless, dirArg: shareArg });
+  const args = tartRunArgs(context.instance, {
+    headless: context.options.headless,
+    dirArg: shareArg,
+  });
   logger.cmd(`tart ${args.join(' ')}`);
-  state.tartLog = join(paths.logs, `tart-${context.vm}.log`);
+  state.tartLog = join(paths.logs, `tart-${context.instance}.log`);
   if (context.options.foreground) {
     const child = spawn('tart', args, { stdio: 'inherit' });
     state.tartChild = child;
@@ -202,8 +214,8 @@ async function waitForBoot(context: RunContext, state: RunState): Promise<void> 
       process.stdout.write('\n');
       logger.die("'tart run' exited before the VM started.");
     }
-    if ((await vmState(context.vm)) === 'running') {
-      const ip = await vmIp(context.vm);
+    if ((await vmState(context.instance)) === 'running') {
+      const ip = await vmIp(context.instance);
       state.vmIp = ip;
       process.stdout.write(` ${logger.color('green')}done${logger.reset()}\n`);
       logger.ok(ip ? `VM is running (IP: ${ip}).` : 'VM is running.');
@@ -213,7 +225,7 @@ async function waitForBoot(context: RunContext, state: RunState): Promise<void> 
     await sleep(2000);
   }
   process.stdout.write('\n');
-  logger.die(`timed out waiting for '${context.vm}' to boot.`);
+  logger.die(`timed out waiting for '${context.instance}' to boot.`);
 }
 
 // --- step 4/5 hooks ---------------------------------------------------------
@@ -224,16 +236,20 @@ async function setupSettings(context: RunContext, state: RunState): Promise<void
     state.settings = 'skipped';
     return;
   }
-  state.settings = await ensureUserSettings(context.vm, context.options.home, context.options.yes);
+  state.settings = await ensureUserSettings(
+    context.instance,
+    context.options.home,
+    context.options.yes,
+  );
   if (state.settings === 'copied') {
-    await restartOpenchamber(context.vm);
+    await restartOpenchamber(context.instance, context.openchamberPort);
   }
 }
 
 async function verifyOpenchamber(context: RunContext, state: RunState): Promise<void> {
   let ip = state.vmIp;
   if (!ip) {
-    ip = await vmIp(context.vm);
+    ip = await vmIp(context.instance);
     state.vmIp = ip;
   }
   if (!ip) {
@@ -288,8 +304,8 @@ async function waitForForegroundVm(context: RunContext, state: RunState): Promis
     });
   });
   if (exitCode === 0) {
-    logger.info(`VM '${context.vm}' has stopped.`);
+    logger.info(`VM '${context.instance}' has stopped.`);
   } else {
-    logger.warn(`VM '${context.vm}' exited with an error (see tart output above).`);
+    logger.warn(`VM '${context.instance}' exited with an error (see tart output above).`);
   }
 }

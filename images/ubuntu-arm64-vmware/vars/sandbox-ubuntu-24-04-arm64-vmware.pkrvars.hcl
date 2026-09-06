@@ -18,7 +18,8 @@ iso_sha256 = "9a6ce6d7e66c8abed24d24944570a495caca80b3b0007df02818e13829f27f32"
 # Toolchain versions. Direct downloads are pinned by version + SHA256 here
 # (the hashes come from the vendor's published checksums); nvm (Node) and
 # rustup (Rust) pin the major/minor and resolve the latest patch. apt
-# packages (gcc, git, python3, ...) come from the Ubuntu archive.
+# packages (gcc, git, ...) come from the Ubuntu archive, except Python,
+# which is pinned to the archive's python3.<minor> package.
 node_version = "26"
 python_version = "3.12"
 github_cli_version = "2.98.0"
@@ -46,6 +47,29 @@ docker_compose_sha256 = "ff42489f5a9b879d5d117c5ffea6defc27390b3286da8ad52cbc9c6
 docker_buildx_version = "0.36.1"
 docker_buildx_sha256 = "5d0cafd9d16afe1a0f0d9529885344ace2cc99efdd531b6c783c5455a6001569"
 
+# Optional toolchains (empty = skip; see sandbox.pkr.hcl) — OpenJDK from the
+# archive (JAVA_HOME exported via /etc/profile.d), Gradle (hash-pinned bin
+# zip + wrapper pre-cache) and the Android SDK, bootstrapped into
+# /opt/android-sdk (the Linux guest has no pre-installed SDK).
+#
+# Kotlin/Native is deliberately left empty: JetBrains publishes prebuilt
+# Kotlin/Native tarballs only for macOS (x86_64/aarch64) and Linux x86_64 —
+# the linux-aarch64 URL 404s for every version (verified 2026-09-02:
+# releases/1.9.24/linux-aarch64/... 404s), so the pre-cache could never
+# work and a non-empty value fails the build at curl.
+java_version = "17"
+gradle_version = "8.7"
+gradle_sha256 = "544c35d6bd849ae8a5ed0bcea39ba677dc40f49df7d1835561582da2009b961d"
+kotlin_native_version = ""
+android_cmdline_tools_version = "14742923"
+android_cmdline_tools_sha256 = "04453066b540409d975c676d781da1477479dde3761310f1a7eb92a1dfb15af7"
+android_sdk_packages = ["ndk;29.0.14206865", "build-tools;34.0.0"]
+
+# OpenChamber desktop app (linux-arm64 AppImage from the GitHub releases,
+# hash-pinned) — parity with the mac image's openchamber cask.
+openchamber_desktop_version = "1.22.0"
+openchamber_desktop_sha256 = "bab9b4acb53d88bbde4c7e3c2a7d4fac92ea43cbbf2b7c94c9f16c8cb82cd5e5"
+
 # VM resources
 disk_size = 100
 cpu_count = 4
@@ -68,4 +92,4 @@ openchamber_port = 4000
 # besides :latest). For every release: bump it, add a CHANGELOG.md entry,
 # and create the ubuntu-arm64-vmware-v<version> git tag
 # (npx agent-dev-env tag <image>).
-image_version = "1.1.0"
+image_version = "1.2.0"

@@ -103,7 +103,10 @@ function install(argv: string[]): number {
     const task = taskFor(role, port, hostAlias);
     tasks.push(task);
     const xmlPath = join(tmpdir(), `${task.taskName}.xml`);
-    writeFileSync(xmlPath, schtasksXml(task), 'utf16le');
+    // schtasks rejects a BOM-less UTF-16 file ("The task XML is
+    // malformed. (1,2):: one root element") — the \uFEFF prefix becomes
+    // the FE FF byte-order mark in utf16le.
+    writeFileSync(xmlPath, '\uFEFF' + schtasksXml(task), 'utf16le');
     try {
       execFileSync('schtasks', ['/Create', '/TN', task.taskName, '/XML', xmlPath, '/F'], {
         stdio: 'ignore',

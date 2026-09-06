@@ -69,6 +69,31 @@ export function resolveGuestCredentials(
   return guestCredentials(varsFor(resolveImage(image)), env, ip);
 }
 
+/** The probes used to locate a node binary in the guest, in order. The
+ *  image installs node via nvm, and the stock Ubuntu `~/.bashrc` starts
+ *  with the interactive-only guard (`case $- in *i* ;; *) return;;`), so
+ *  no *non*-interactive login shell — dash or bash — sources nvm:
+ *  1. an interactive bash (`-i` — sources the whole `~/.bashrc` → nvm),
+ *  2. the nvm install dirs directly (default/newest version),
+ *  3. the POSIX login shell (a system node, e.g. `/usr/bin/node`).
+ */
+const GUEST_NODE_PROBES: readonly string[] = [
+  'bash -ic "command -v node"',
+  'bash -lc \'ls -d "$HOME"/.nvm/versions/node/v*/bin/node 2>/dev/null | sort -V | tail -n 1\'',
+  'sh -lc "command -v node"',
+];
+
+/** @internal — picks the absolute node path out of one probe result
+ *  (the last line when the probe printed several).
+ *
+ * @param result - The probe exec result.
+ * @returns The node path, or undefined when the probe found nothing.
+ */
+export function nodeFromProbe(result: { code: number; stdout: string }): string | undefined {
+  const node = result.code === 0 ? (result.stdout.trim().split('\n').pop()?.trim() ?? '') : '';
+  return node && node.startsWith('/') ? node : undefined;
+}
+
 /** Reports the path of the node binary inside the guest (opencode needs
  *  it, so the image ships it; resolve once per session like the mac
  *  backend).
@@ -77,9 +102,13 @@ export function resolveGuestCredentials(
  * @returns The absolute node path, or undefined when not found.
  */
 export async function findGuestNode(session: SshSession): Promise<string | undefined> {
-  const res = await session.exec('sh -lc "command -v node"');
-  const node = res.code === 0 ? res.stdout.trim() : '';
-  return node && node.startsWith('/') ? node : undefined;
+  for (const probe of GUEST_NODE_PROBES) {
+    const node = nodeFromProbe(await session.exec(probe));
+    if (node) {
+      return node;
+    }
+  }
+  return undefined;
 }
 
 /** Uploads the bundled guest agent and runs `install` (idempotent:

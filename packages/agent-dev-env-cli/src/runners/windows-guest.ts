@@ -139,20 +139,45 @@ export async function psExec(
   return { stdout: stripSentinel(res.stdout, sentinel), stderr: res.stderr };
 }
 
+/** Default node probe attempts (the guest can still be applying the
+ *  machine PATH to sshd sessions right after a reboot, so a single
+ *  `where.exe node` can miss it — observed on the first boot after the
+ *  auto-logon reboot). */
+const NODE_PROBE_TRIES = 5;
+
+/** Delay between node probes (same rhythm as readGuestStatus polling). */
+const NODE_PROBE_DELAY_MS = 3_000;
+
 /** Reports the path of the node binary inside the guest (the image ships
- *  node; resolve once per session like the other backends).
+ *  node; resolve once per session like the other backends). The probe is
+ *  retried a few times because a rebooting guest can serve sshd with a
+ *  stale session PATH — the bridges must not be skipped on a false miss.
  *
  * @param session - The connected guest session.
+ * @param tries - Probe attempts (default 5 = up to ~15 s).
+ * @param delayMs - Delay between attempts (default 3 s).
  * @returns The node path, or undefined when not found.
  */
-export async function findGuestNode(session: SshSession): Promise<string | undefined> {
+export async function findGuestNode(
+  session: SshSession,
+  tries = NODE_PROBE_TRIES,
+  delayMs = NODE_PROBE_DELAY_MS,
+): Promise<string | undefined> {
   const script = [
     '$p = where.exe node 2>$null | Select-Object -First 1',
     'if ($p) { Write-Output $p }',
   ].join('\n');
-  const res = await psExec(session, script, 20_000);
-  const node = res.stdout.trim().split('\n')[0] ?? '';
-  return node ? node : undefined;
+  for (let attempt = 1; attempt <= tries; attempt += 1) {
+    const res = await psExec(session, script, 20_000);
+    const node = res.stdout.trim().split('\n')[0] ?? '';
+    if (node) {
+      return node;
+    }
+    if (attempt < tries) {
+      await sleep(delayMs);
+    }
+  }
+  return undefined;
 }
 
 /** Uploads the bundled guest agent and runs `install` (idempotent:
@@ -171,13 +196,19 @@ export async function ensureGuestAgent(
   hostAlias: string,
   context: RunContext,
 ): Promise<void> {
+  // Decide by an stdout marker, not stderr: a fresh sshd PowerShell
+  // session writes CLIXML module-progress noise ("Preparing modules for
+  // first use") to stderr on the first command, which used to look like
+  // a failed mkdir and skipped the whole guest-agent install (observed on
+  // the new windows-vmware image's first bridge setup).
   const mkdir = await psExec(
     session,
-    `New-Item -ItemType Directory -Force '${GUEST_AGENT_DIR_PS}' | Out-Null`,
+    `New-Item -ItemType Directory -Force '${GUEST_AGENT_DIR_PS}' | Out-Null; ` +
+      `if (Test-Path '${GUEST_AGENT_DIR_PS}') { Write-Output 'dir-ok' } else { Write-Output 'dir-fail' }`,
     30_000,
   );
-  if (mkdir.stderr.trim()) {
-    logger.warn(`could not prepare the guest agent dir: ${mkdir.stderr.trim()}`);
+  if (!mkdir.stdout.includes('dir-ok')) {
+    logger.warn('could not prepare the guest agent dir.');
     return;
   }
   try {

@@ -95,10 +95,19 @@ The macOS/tart images build no files and have no such directory.
 | VMware Tools | ARM64 tools from the Fusion install (attached by the builder, installed at first logon); enables `vmrun getGuestIPAddress` (no HGFS shared folders for Win11 ARM guests) |
 | VMware drivers | vmxnet3 ARM64 NIC driver (staged into the unattend CD); NVMe disk uses the in-box driver |
 | Chocolatey | Community package manager (versions pinned in the vars file) |
-| Node.js, Python, Git, gh, ripgrep, jq, curl | Choco packages (versions from the vars file) |
-| Go, Vim, NuGet, make, MinGW-w64 | Choco packages (versions from the vars file) |
+| Node.js | Official win-arm64 zip from nodejs.org (version + SHA256 in the vars file) — native ARM64, no x64 emulation |
+| Google Chrome | Official Windows ARM64 enterprise MSI (SHA256 in the vars file; the URL is Google's live channel — refresh the hash on Chrome releases) |
+| Firefox | Official win64-aarch64 installer (version + SHA256 in the vars file) — native ARM64 |
+| Python, Git, gh | Official win-arm64 builds (version + SHA256 in the vars file) — native ARM64 |
+| ripgrep, jq, curl | Choco packages (no win-arm64 builds; run emulated) |
+| Ninja, Git LFS | Ninja choco package (version from the vars file); Git LFS is bundled with Git for Windows, filters wired |
+| pnpm, yarn | npm globals alongside the Node toolchain |
+| Go | Official win-arm64 toolchain (`go<version>.windows-arm64.zip`, SHA256-pinned) — `go build` produces arm64 output |
+| Vim, NuGet, make, MinGW-w64 | Choco packages (no win-arm64 builds; run emulated) |
 | Rust | Via rustup (arm64 host toolchain + MSVC targets for x86_64/i686/aarch64), `rust`/`cargo` on PATH |
-| VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), CMake, Windows 11 SDK |
+| JDK (Temurin) | Official Adoptium win-aarch64 zip machine `JAVA_HOME` + `bin` on PATH, verified `jni.h`/`jvm.lib` (JDK, not a JRE) — Gradle/Android/package:jni ready |
+| Conan | C/C++ dependency manager, current release via pip |
+| VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), ATL, CMake, Windows 11 SDK |
 | WiX, protoc, NASM, LLVM | Choco packages (versions from the vars file) |
 | Visual Studio Code | Native arm64 build, latest stable, direct download; `code` on PATH |
 | Google Chrome | Chrome for Testing snapshot, hash-pinned (see the vars file); x64, runs under Prism emulation |
@@ -106,8 +115,11 @@ The macOS/tart images build no files and have no such directory.
 | OpenCode (`opencode-ai`) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
 | OpenChamber web UI | npm global (`@openchamber/web`), native service on `0.0.0.0:4000` |
+| OpenChamber desktop app | win-arm64 NSIS installer, hash-pinned (see the vars file); Start Menu shortcut |
+| Long paths + Developer Mode | Registry (`LongPathsEnabled`, `AllowDevelopmentWithoutDevLicense`) + `git config --system core.longpaths` |
 | OpenSSH Server + RDP | Enabled; Administrator/sandbox1 (see the vars file) |
 | Docker CLI | Client only (`docker` + `docker compose`), remote engine via the host bridge |
+| Image identity | `%USERPROFILE%\.config\agent-dev-env\image.json` (image name + `image_version`, baked at build time) |
 | Bridge tooling | Node relays (in-image `node.exe`, written by the bundled guest agent) for the SSH-agent/Docker bridges — the host side is the CLI's own forwarder (no socat) |
 
 ## Versioning

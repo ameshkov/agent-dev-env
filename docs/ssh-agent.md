@@ -39,7 +39,9 @@ The bridge is two forwarders (no socat, no shell scripts — the same bundled
 - installs and starts the platform's guest agent, which creates the socket
   in the guest at a fixed path and points `SSH_AUTH_SOCK` at it
   (macOS: LaunchAgent + `~/.zprofile` + the `IdentityAgent` patch in
-  `~/.ssh/config`; Ubuntu: systemd user services + `/etc/profile.d`;
+  `~/.ssh/config`; Ubuntu: systemd user services + `/etc/profile.d` (root)
+  or `~/.profile` + `~/.bashrc` (user — `~/.bashrc` is what covers the
+  interactive terminals; open a new shell after `run`;
   Windows: ONLOGON scheduled tasks + the `\\.\pipe\openssh-ssh-agent`
   named pipe), and
 - verifies the bridge, so `ssh`/`git` inside the guest authenticate with

@@ -6,8 +6,10 @@
 //
 // The bridge is spawned detached with a pidfile under the logs/state dir
 // and keeps running after the CLI exits (the VM needs it while it runs);
-// `stop` kills it by pidfile. Idempotent: when a listener is already up,
-// nothing is spawned.
+// `stop` kills it by pidfile. The pidfile is keyed by role + port +
+// instance so multiple sandbox instances never share a bridge. A foreign
+// listener on the port (not our pidfile) is a port conflict — the
+// caller must die with a SANDBOX_*_PORT hint instead of reusing it.
 
 import net from 'node:net';
 import { lstatSync, mkdirSync, rmSync } from 'node:fs';
@@ -25,14 +27,27 @@ function bridgeJsPath(): string {
   return fileURLToPath(new URL('../assets/bridge/bridge.js', import.meta.url));
 }
 
-/** @internal — pidfile for a host bridge (logs/state dir). */
-export function bridgePidFile(role: BridgeRole): string {
-  return join(paths.logs, `bridge-${role}.pid`);
+/** @internal — pidfile for a host bridge (logs/state dir). The instance
+ *  name is part of the key: two instances may use different ports and we
+ *  must never confuse their bridges.
+ */
+export function bridgePidFile(role: BridgeRole, port: number, instance: string): string {
+  return join(paths.logs, `bridge-${role}-${port}-${instance}.pid`);
 }
 
 /** @internal — log file for a host bridge. */
-export function bridgeLogFile(role: BridgeRole): string {
-  return join(paths.logs, `bridge-${role}.log`);
+export function bridgeLogFile(role: BridgeRole, port: number, instance: string): string {
+  return join(paths.logs, `bridge-${role}-${port}-${instance}.log`);
+}
+
+/** Whether the pidfile for a bridge belongs to a live bridge.js process.
+ *
+ * @param pidFile - The pidfile path.
+ * @returns True when the recorded pid is alive.
+ */
+function bridgePidAlive(pidFile: string): boolean {
+  const pid = readPidFile(pidFile);
+  return pid !== undefined && isAlive(pid);
 }
 
 /** Whether the path is a Unix socket. */
@@ -110,27 +125,40 @@ export function canConnectTcp(host: string, port: number, timeoutMs = 1000): Pro
 }
 
 export type StartBridgeResult =
-  { state: 'already-up' } | { state: 'started'; pid: number } | { state: 'failed' };
+  | { state: 'already-up' }
+  | { state: 'started'; pid: number }
+  | { state: 'conflict' }
+  | { state: 'failed' };
 
 /** Spawns the detached host bridge (or reports it is already up).
  *
- * @param args - role (pidfile/log naming), bind host + port and the
- *   forward socket (unix path on the host).
- * @returns The outcome; nothing is spawned when the port is already
- *   served.
+ * @param args - role (pidfile/log naming), bind host + port, the forward
+ *   socket (unix path on the host) and the instance key.
+ * @returns The outcome; `already-up` reuses the bridge this instance owns
+ *   (live pidfile), `conflict` means the port serves a foreign listener
+ *   (another instance or process) — the caller must stop/die.
  */
 export async function startHostBridge(args: {
   role: BridgeRole;
   bindHost: string;
   port: number;
   forwardSocket: string;
+  instance: string;
 }): Promise<StartBridgeResult> {
+  const pidFile = bridgePidFile(args.role, args.port, args.instance);
   if (await canConnectTcp(args.bindHost, args.port)) {
-    logger.ok(`A listener is already bound to TCP port ${args.port} — assuming the bridge is up.`);
-    return { state: 'already-up' };
+    if (bridgePidAlive(pidFile)) {
+      logger.ok(
+        `A listener is already bound to TCP port ${args.port} — assuming the bridge is up.`,
+      );
+      return { state: 'already-up' };
+    }
+    logger.warn(
+      `TCP port ${args.port} already has a listener that is not this instance\u2019s bridge.`,
+    );
+    return { state: 'conflict' };
   }
 
-  const pidFile = bridgePidFile(args.role);
   const pid = spawnDetached(
     process.execPath,
     [
@@ -142,7 +170,7 @@ export async function startHostBridge(args: {
       '--pidfile',
       pidFile,
     ],
-    { logFile: bridgeLogFile(args.role) },
+    { logFile: bridgeLogFile(args.role, args.port, args.instance) },
   );
   if (pid <= 0) {
     logger.warn('host bridge failed to start — check the agent socket path.');
@@ -161,15 +189,38 @@ export async function startHostBridge(args: {
   return { state: 'started', pid };
 }
 
+/** The die-message for a port conflict (the SANDBOX_*_PORT env vars are
+ *  the per-instance escape hatch).
+ *
+ * @param role - The bridge role.
+ * @param instance - The instance name.
+ * @param port - The TCP port that is taken.
+ * @returns The message.
+ */
+export function bridgeConflictMessage(role: BridgeRole, instance: string, port: number): string {
+  const envVar = role === 'ssh-agent' ? 'SANDBOX_AGENT_PORT' : 'SANDBOX_DOCKER_PORT';
+  return (
+    `TCP port ${port} is already serving another sandbox — the bridge for ` +
+    `instance '${instance}' cannot start. Set ${envVar} to a free port for ` +
+    'this instance (see docs/cli.md).'
+  );
+}
+
 /** Stops the detached bridge for a role: pidfile → killTree, pidfile
  *  removed. No-op when nothing is running (idempotent, like the legacy
  *  stop script's "no listener" branch).
  *
  * @param role - The bridge role.
+ * @param port - The bridge port.
+ * @param instance - The instance name.
  * @returns The pid when something was stopped, undefined otherwise.
  */
-export async function stopHostBridge(role: BridgeRole): Promise<number | undefined> {
-  const pidFile = bridgePidFile(role);
+export async function stopHostBridge(
+  role: BridgeRole,
+  port: number,
+  instance: string,
+): Promise<number | undefined> {
+  const pidFile = bridgePidFile(role, port, instance);
   const pid = readPidFile(pidFile);
   if (pid !== undefined && isAlive(pid)) {
     await killTree(pid);
@@ -184,5 +235,7 @@ export async function stopHostBridge(role: BridgeRole): Promise<number | undefin
  *  and the tart run log).
  */
 export function ensureBridgeDir(): void {
-  mkdirSync(dirname(bridgePidFile('ssh-agent')), { recursive: true });
+  mkdirSync(dirname(bridgePidFile('ssh-agent', 4100, 'default-agent-dev-env')), {
+    recursive: true,
+  });
 }

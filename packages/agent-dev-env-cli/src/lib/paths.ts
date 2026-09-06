@@ -23,17 +23,28 @@
 //                                  packer_cache + staged drivers)
 //     build-context/<platform>/    materialized packer context (writable
 //                                  copy of images/<platform>)
-//     windows-qemu/<image>/        image/ (pristine qcow2), working/ (overlay,
-//                                  efivars.fd, tpm/, pids, socks)
-//     windows-vmware/<image>/      image/, base/, working/
-//     ubuntu-vmware/<image>/       image/, base/, working/
+//     macos/<image>/               provenance records only (working/<instance>/
+//                                  clone.json + image.json — Tart owns the
+//                                  VM itself)
+//     windows-qemu/<image>/        image/ (pristine qcow2), working/<instance>/
+//                                  (overlay, efivars.fd, tpm/, pids, socks,
+//                                  clone.json) + image.json (provenance)
+//     windows-vmware/<image>/      image/, base/, working/<instance>/, clone.json
+//                                  + image.json (provenance records)
+//     ubuntu-vmware/<image>/       image/, base/, working/<instance>/,
+//                                  clone.json + image.json (provenance records)
 //
-// macOS has no data footprint by design: Tart owns the image + working VM
-// (github.com/cirruslabs/tart) — only ~/Library/Logs/agent-dev-env/tart-*.log
-// is ours. Guest-side markers (~/.config/agent-dev-env/…) live inside the
-// guests; XDG_CONFIG_HOME is a documented future hook, no host config file
-// yet.
+// The pristine image cache (image/ + base/) is shared across all instances:
+// one pull/extraction serves N sandboxes. Each instance's working state
+// (clone/overlay, TPM, NVRAM, pidfiles) lives under working/<instance>/.
+//
+// macOS has no VM-state footprint by design: Tart owns the image + working
+// VM (github.com/cirruslabs/tart) — only the provenance records above and
+// ~/Library/Logs/agent-dev-env/tart-*.log are ours. Guest-side markers
+// (~/.config/agent-dev-env/…) live inside the guests; XDG_CONFIG_HOME is
+// a documented future hook, no host config file yet.
 
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Platform } from './platform.js';
@@ -91,8 +102,8 @@ export function resolvePaths(options: PathsOptions = {}): ResolvedPaths {
 /** The resolved roots for this process. */
 export const paths = resolvePaths();
 
-/** @internal — <data>/<platform>, the platform's state root (unused by
- *  macOS).
+/** @internal — <data>/<platform>, the platform's state root (macOS uses
+ *  it only for the provenance records; Tart owns the VM store).
  * @param platform - The platform id.
  * @returns The platform's data dir.
  */
@@ -120,7 +131,8 @@ export function imageRootDir(platform: Platform, image: string): string {
 }
 
 /** <data>/<platform>/<image>/image/<image>.tar.gz — the cached VMware
- *  archive (the runner's pull cache; status/deploy read it too).
+ *  archive (the runner's pull cache; shared across instances; status/deploy
+ *  read it too).
  *
  * @param platform - The platform id.
  * @param image - The image name.
@@ -130,13 +142,56 @@ export function vmwareArchivePath(platform: Platform, image: string): string {
   return join(imageRootDir(platform, image), 'image', `${image}.tar.gz`);
 }
 
-/** <data>/<platform>/<image>/working/<image>.vmx — the VMware working
- *  clone (the vmx path the runners/stop/delete flows derive).
+/** <data>/<platform>/<image>/working — the per-instance working state dir
+ *  (one subdir per sandbox instance).
  *
  * @param platform - The platform id.
  * @param image - The image name.
+ * @returns The instances dir.
+ */
+function instancesDir(platform: Platform, image: string): string {
+  return join(imageRootDir(platform, image), 'working');
+}
+
+/** <data>/<platform>/<image>/working/<instance> — one sandbox instance's
+ *  state root (VMware clone, QEMU overlay/TPM/NVRAM, pidfiles, clone.json).
+ *
+ * @param platform - The platform id.
+ * @param image - The image name.
+ * @param instance - The instance name.
+ * @returns The instance's state dir.
+ */
+export function instanceDir(platform: Platform, image: string, instance: string): string {
+  return join(instancesDir(platform, image), instance);
+}
+
+/** <data>/<platform>/<image>/working/<instance>/<image>.vmx — the VMware
+ *  working clone (the vmx path the runners/stop/delete flows derive).
+ *
+ * @param platform - The platform id.
+ * @param image - The image name.
+ * @param instance - The instance name.
  * @returns The working vmx path.
  */
-export function workingVmxPath(platform: Platform, image: string): string {
-  return join(imageRootDir(platform, image), 'working', `${image}.vmx`);
+export function workingVmxPath(platform: Platform, image: string, instance: string): string {
+  return join(instanceDir(platform, image, instance), `${image}.vmx`);
+}
+
+/** The instance names that already have working state under an image.
+ *  Covers the default instance ('default-agent-dev-env') plus any
+ *  SANDBOX_VM one.
+ *
+ * @param platform - The platform id.
+ * @param image - The image name.
+ * @returns The instance names (sorted; empty when none exist yet).
+ */
+export function listInstances(platform: Platform, image: string): string[] {
+  const dir = instancesDir(platform, image);
+  if (!existsSync(dir)) {
+    return [];
+  }
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 }

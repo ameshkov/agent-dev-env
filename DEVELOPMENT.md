@@ -172,6 +172,31 @@ under the CLI's data root — `<data>/build/<platform>/` (on macOS
 - windows-vmware: `output/sandbox-windows-11-arm64-vmware.{vmx,vmdk,etc}`.
 - ubuntu-vmware: `output/sandbox-ubuntu-24-04-arm64-vmware.{vmx,vmdk,etc}`.
 
+## Image provenance
+
+Every sandbox answers "which image is this from" on the host and inside the
+guest (no forensics, no boot needed):
+
+- **Guest identity** — the Packer templates bake
+  `~/.config/agent-dev-env/image.json` into each image (image name,
+  `image_version`, platform, base OS versions). Clones inherit it.
+- **Host records** — the runners keep two JSON files next to the per-image
+  state root (`lib/provenance.ts`):
+    - `<data>/<platform>/<image>/image.json` — the pristine image's pull
+      record: the GHCR ref + a best-effort registry digest
+      (`oras manifest fetch --descriptor`) + pull time;
+    - `<data>/<platform>/<image>/clone.json` — the working VM's clone
+      record: the source (tart image / qcow2 overlay / vmx clone), the
+      `path|size|mtime` artifact identity (non-Tart backends), and the clone
+      time. Backfilled records are written for working VMs cloned before
+      provenance tracking.
+
+Records are best-effort and never fatal (`resolveRegistryDigest` returns
+undefined on any failure; the readers tolerate missing/corrupt files).
+`status` and the run summaries print them; they are cleared when the
+working VM is deleted (`--reset`, `delete`), and the image record when the
+pristine image is deleted (`--pristine`).
+
 ## macOS images
 
 ### How they are built
@@ -271,7 +296,7 @@ To add a new one:
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `macos_version` | string | — | Cirrus base image macOS version, e.g. `tahoe`; part of the image name (`sandbox-macos-<macos_version>`) |
-| `xcode_version` | string | — | Cirrus base image Xcode tag, e.g. `26.4.1` (selects the base image only; not part of the image name) |
+| `xcode_version` | string | — | Cirrus base image Xcode tag, e.g. `26.5` (selects the base image only; not part of the image name) |
 | `node_version` | string | — | Node.js version installed via nvm and set as the default, e.g. `26` |
 | `python_version` | string | — | Homebrew Python version, e.g. `3.14` (also used for the unversioned `python`/`pip` aliases) |
 | `image_version` | string | — | Semantic version this image is published under; bump it + add a `CHANGELOG.md` entry per release |
@@ -481,7 +506,15 @@ the foreground (with hard errors for missing prerequisites).
 | `virtio_win_iso_path` | string | — | Path to virtio-win.iso (set by the build flow) |
 | `virtio_win_url` | string | stable URL | Download URL used by the build flow when `VIRTIO_WIN_ISO_PATH` is unset |
 | `virtio_win_sha256` | string | `` | SHA256 of virtio-win.iso (verified by the build flow; empty = skip) |
-| `nodejs_version` / `python_version` / `github_cli_version` / `ripgrep_version` / `git_version` / `jq_version` | string | pinned | Choco package versions installed in every image |
+| `nodejs_version` / `nodejs_sha256` | string | pinned | Node.js version + SHA256 of `node-v<version>-win-arm64.zip` (the official win-arm64 build — choco's `nodejs` is x64, which runs under emulation and crashes opencode's native path) |
+| `python_version` / `python_sha256` | string | pinned | Python version + SHA256 of `python-<version>-arm64.exe` (official win-arm64 installer) |
+| `github_cli_version` / `github_cli_sha256` | string | pinned | GitHub CLI version + SHA256 of `gh_<version>_windows_arm64.zip` |
+| `git_version` / `git_sha256` | string | pinned | Git version + SHA256 of `Git-<version>-arm64.exe` (Git for Windows win-arm64 installer) |
+| `firefox_version` / `firefox_sha256` | string | pinned | Firefox version + SHA256 of `Firefox Setup <version>.exe` (win64-aarch64) |
+| `go_version` / `go_sha256` | string | pinned | Go version + SHA256 of `go<version>.windows-arm64.zip` |
+| `jdk_version` / `jdk_sha256` | string | pinned | JDK version + SHA256 of the Adoptium win-aarch64 zip (choco's `temurin21` is x64) |
+| `chrome_sha256` | string | pinned | SHA256 of the official Windows ARM64 Chrome MSI — the URL is Google's live enterprise channel, refresh the hash on every Chrome release (Chrome for Testing ships no win-arm64 builds) |
+| `ripgrep_version` / `jq_version` | string | pinned | Choco package versions (no win-arm64 builds exist; they run emulated) |
 | `open_code_review_version` | string | pinned | `ocr` version installed via npm |
 | `disk_size` | number | `100` | VM disk size in GB |
 | `cpu_count` | number | `4` | CPU count of the VM |
@@ -607,7 +640,7 @@ per image lives in `~/Library/Application Support/agent-dev-env/build/ubuntu-vmw
 | `iso_sha256` | string | `` | SHA256 of the Ubuntu ISO (verified by the build flow; empty = skip) |
 | `ssh_username` | string | `admin` | SSH provisioning user; must match `autoinstall/user-data` |
 | `ssh_password` | string | `sandbox1` | SSH provisioning password; must match the crypt hash in `autoinstall/user-data` |
-| `node_version` / `python_version` | string | `26` / `3.12` | Node major (nvm) and Python (apt archive) versions |
+| `node_version` / `python_version` | string | `26` / `3.12` | Node major (nvm) and Python `python3.<minor>` archive package versions |
 | `github_cli_version` / `go_version` / `rust_version` / `vscode_version` / `chrome_version` / `firefox_version` / `open_code_review_version` | string | pinned | Pinned toolchain versions (+ SHA256 vars for the direct downloads) |
 | `docker_version` / `docker_compose_version` / `docker_buildx_version` | string | pinned | Docker CLI + plugin versions (+ SHA256 vars) |
 | `disk_size` | number | `100` | VM disk size in GB |

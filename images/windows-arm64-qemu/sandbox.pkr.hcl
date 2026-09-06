@@ -81,32 +81,52 @@ variable "virtio_win_sha256" {
 
 variable "nodejs_version" {
   type        = string
-  description = "Node.js version, e.g. '26.8.1' (choco package version)."
+  description = "Node.js version, e.g. '26.8.1' (official win-arm64 zip from nodejs.org)."
+}
+
+variable "nodejs_sha256" {
+  type        = string
+  description = "SHA256 of node-v<nodejs_version>-win-arm64.zip (from nodejs.org SHASUMS256.txt)."
 }
 
 variable "python_version" {
   type        = string
-  description = "Python version, e.g. '3.13.1' (choco package version)."
+  description = "Python version, e.g. '3.13.15' (official win-arm64 installer from python.org)."
+}
+
+variable "python_sha256" {
+  type        = string
+  description = "SHA256 of python-<python_version>-arm64.exe."
 }
 
 variable "github_cli_version" {
   type        = string
-  description = "GitHub CLI version, e.g. '2.97.0' (choco package version)."
+  description = "GitHub CLI version, e.g. '2.97.0' (official win-arm64 zip)."
+}
+
+variable "github_cli_sha256" {
+  type        = string
+  description = "SHA256 of gh_<github_cli_version>_windows_arm64.zip."
 }
 
 variable "ripgrep_version" {
   type        = string
-  description = "ripgrep version, e.g. '15.2.0' (choco package version)."
+  description = "ripgrep version, e.g. '15.2.0' (choco package version; no win-arm64 build exists)."
 }
 
 variable "git_version" {
   type        = string
-  description = "Git version, e.g. '2.55.0.4' (choco package version)."
+  description = "Git version, e.g. '2.55.0.4' (Git for Windows release; the installer is the win-arm64 exe)."
+}
+
+variable "git_sha256" {
+  type        = string
+  description = "SHA256 of Git-<git_version>-arm64.exe (Git for Windows release v<git_version>.windows.<patch>)."
 }
 
 variable "jq_version" {
   type        = string
-  description = "jq version, e.g. '1.8.1' (choco package version)."
+  description = "jq version, e.g. '1.8.1' (choco package version; no win-arm64 build exists)."
 }
 
 variable "open_code_review_version" {
@@ -114,14 +134,9 @@ variable "open_code_review_version" {
   description = "open-code-review (ocr) version installed via npm."
 }
 
-variable "chrome_version" {
-  type        = string
-  description = "Google Chrome version (Chrome for Testing snapshot, e.g. '152.0.7977.54')."
-}
-
 variable "chrome_sha256" {
   type        = string
-  description = "SHA256 of the CfT chrome-win64.zip for chrome_version."
+  description = "SHA256 of the official Windows ARM64 Chrome MSI (googlechromestandaloneenterprise_arm64.msi). The MSI URL is Google's live enterprise channel — refresh the hash on every Chrome release (CfT ships no win-arm64 builds)."
 }
 
 # --- C/C++ + cross-language toolchains (brought over from AdGuard's
@@ -134,12 +149,42 @@ variable "vs_buildtools_version" {
 
 variable "go_version" {
   type        = string
-  description = "Go version (choco package version)."
+  description = "Go version, e.g. '1.27.0' (official go<version>.windows-arm64.zip)."
+}
+
+variable "go_sha256" {
+  type        = string
+  description = "SHA256 of go<go_version>.windows-arm64.zip."
 }
 
 variable "rust_version" {
   type        = string
   description = "Rust toolchain version installed via rustup (e.g. '1.95'; rustup resolves the latest patch)."
+}
+
+variable "jdk_version" {
+  type        = string
+  description = "JDK version, e.g. '21.0.12.1' (Adoptium Temurin win-aarch64 zip; exposed as JAVA_HOME — a JDK, not a JRE: Gradle/Android and package:jni-style C++ builds need jni.h and jvm.lib)."
+}
+
+variable "jdk_sha256" {
+  type        = string
+  description = "SHA256 of the Adoptium Temurin win-aarch64 JDK zip for jdk_version."
+}
+
+variable "firefox_version" {
+  type        = string
+  description = "Firefox version, e.g. '155.0.1' (official win64-aarch64 installer)."
+}
+
+variable "firefox_sha256" {
+  type        = string
+  description = "SHA256 of Firefox Setup <firefox_version>.exe (win64-aarch64)."
+}
+
+variable "ninja_version" {
+  type        = string
+  description = "Ninja build tool version, e.g. '1.13.2' (choco package version)."
 }
 
 variable "wixtoolset_version" {
@@ -229,6 +274,16 @@ variable "openchamber_port" {
   type        = number
   default     = 4000
   description = "TCP port the OpenChamber web UI listens on inside the guest."
+}
+
+variable "openchamber_desktop_version" {
+  type        = string
+  description = "OpenChamber desktop app version, e.g. \"1.22.0\" (win-arm64 NSIS installer from the GitHub releases)."
+}
+
+variable "openchamber_desktop_sha256" {
+  type        = string
+  description = "SHA256 of the OpenChamber-<version>-win-arm64.exe for openchamber_desktop_version."
 }
 
 # --- QEMU specifics ---
@@ -453,27 +508,124 @@ build {
       $choco = Join-Path (Join-Path $chocoInstall 'bin') 'choco.exe'
       if (-not (Test-Path $choco)) { throw "choco.exe not found at $choco (Chocolatey install failed?)" }
       $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
-      & $choco install nodejs --version=${var.nodejs_version} -y
-      if ($LASTEXITCODE -ne 0) { throw "choco nodejs failed: $LASTEXITCODE" }
-      & $choco install gh --version=${var.github_cli_version} -y
-      if ($LASTEXITCODE -ne 0) { throw "choco gh failed: $LASTEXITCODE" }
+      # Official ARM64 downloads over the VM's usermode networking can drop
+      # mid-transfer; retry, then verify the SHA256 against the pinned
+      # *_sha256 vars. The VM's NAT + the 10 MB+ files make retries
+      # mandatory (observed with the Chrome + Node downloads).
+      function Download-Verified([string]$url, [string]$destFile, [string]$expected) {
+        $downloaded = $false
+        for ($try = 1; $try -le 3 -and -not $downloaded; $try++) {
+          try {
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $destFile -ErrorAction Stop
+            $downloaded = $true
+          } catch {
+            Write-Host "download attempt $try failed ($url): $($_.Exception.Message)"
+            if ($try -lt 3) { Start-Sleep -Seconds 10 }
+          }
+        }
+        if (-not $downloaded) { throw "download failed after 3 attempts: $url" }
+        $actual = (Get-FileHash -Path $destFile -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+          throw "checksum mismatch for $url`n  expected $expected`n  got      $actual"
+        }
+      }
+      # Installer temp files can stay locked after `&` returns (Inno/NSIS
+      # bootstrappers spawn a child setup that holds the exe open; Defender
+      # real-time scanning can also hold a handle on a freshly-run exe) —
+      # retry the delete instead of aborting the build over a temp cleanup.
+      function Remove-TempFile([string]$path) {
+        for ($try = 1; $try -le 20; $try++) {
+          try {
+            Remove-Item -Force -Recurse -Path $path -ErrorAction Stop
+            return
+          } catch {
+            if ($try -eq 20) { throw "could not remove $${path}: $($_.Exception.Message)" }
+            Start-Sleep -Seconds 3
+          }
+        }
+      }
+      # Inno Setup installers can also *hand off* to an elevated child
+      # (UAC split-token) and exit the stub early: `&` returns while the
+      # child still runs and holds the installer exe open. Wait for the
+      # process by name to disappear before the temp-file delete.
+      function Wait-InstallerExited([string]$procName) {
+        for ($try = 1; $try -le 150; $try++) {
+          if (-not (Get-Process -Name $procName -ErrorAction SilentlyContinue)) {
+            return
+          }
+          Start-Sleep -Seconds 2
+        }
+        throw "installer process '$procName' did not exit within 300s"
+      }
+      # Node.js — the official win-arm64 build (nodejs.org zip), not the
+      # Chocolatey package: 'choco install nodejs' installs the x64 build,
+      # which on this ARM64 guest runs under x64 emulation. Every npm
+      # global (opencode-ai, pnpm/yarn, @openchamber/web, ...) then picks
+      # x64 binaries and opencode's native session path crashes
+      # intermittently (0xC0000005). The zip is hash-pinned and extracted
+      # into the standard install location, so the rest of the toolchain
+      # keeps using 'C:\Program Files\nodejs'.
+      Download-Verified "https://nodejs.org/dist/v${var.nodejs_version}/node-v${var.nodejs_version}-win-arm64.zip" "$env:TEMP\node-arm64.zip" '${var.nodejs_sha256}'
+      Expand-Archive -Path "$env:TEMP\node-arm64.zip" -DestinationPath "$env:TEMP\node-x" -Force
+      New-Item -ItemType Directory -Force -Path 'C:\Program Files\nodejs' | Out-Null
+      $srcNode = Get-ChildItem "$env:TEMP\node-x" -Directory | Select-Object -First 1
+      if (-not $srcNode) { throw "Node.js zip extracted nothing" }
+      Copy-Item -Path (Join-Path $srcNode.FullName '*') -Destination 'C:\Program Files\nodejs' -Recurse -Force
+      Remove-TempFile "$env:TEMP\node-x"
+      Remove-TempFile "$env:TEMP\node-arm64.zip"
+      if (-not (Test-Path 'C:\Program Files\nodejs\node.exe')) { throw "node.exe not found after extraction" }
+      # GitHub CLI — official win-arm64 zip (choco's gh package is x64).
+      Download-Verified "https://github.com/cli/cli/releases/download/v${var.github_cli_version}/gh_${var.github_cli_version}_windows_arm64.zip" "$env:TEMP\gh.zip" '${var.github_cli_sha256}'
+      Expand-Archive -Path "$env:TEMP\gh.zip" -DestinationPath "$env:TEMP\gh-x" -Force
+      New-Item -ItemType Directory -Force -Path 'C:\Program Files\GitHub CLI' | Out-Null
+      Copy-Item -Path "$env:TEMP\gh-x\bin\gh.exe" -Destination 'C:\Program Files\GitHub CLI\gh.exe' -Force
+      Remove-TempFile "$env:TEMP\gh.zip"
+      Remove-TempFile "$env:TEMP\gh-x"
+      if (-not (Test-Path 'C:\Program Files\GitHub CLI\gh.exe')) { throw "gh.exe not found after extraction" }
       & $choco install ripgrep --version=${var.ripgrep_version} -y
       if ($LASTEXITCODE -ne 0) { throw "choco ripgrep failed: $LASTEXITCODE" }
-      & $choco install git --version=${var.git_version} -y
-      if ($LASTEXITCODE -ne 0) { throw "choco git failed: $LASTEXITCODE" }
+      # Git — official win-arm64 installer, Inno Setup silent (choco's git
+      # package is x64; the ARM64 build is what makes git-lfs/ssh signing
+      # work natively).
+      $gitTag = 'v' + ('${var.git_version}' -replace '\.(\d+)$', '.windows.$1')
+      Download-Verified "https://github.com/git-for-windows/git/releases/download/$gitTag/Git-${var.git_version}-arm64.exe" "$env:TEMP\git-arm64.exe" '${var.git_sha256}'
+      & "$env:TEMP\git-arm64.exe" /VERYSILENT /NORESTART /NOCANCEL /SP- /SUPPRESSMSGBOXES
+      if ($LASTEXITCODE -ne 0) { throw "git installer failed: $LASTEXITCODE" }
+      Wait-InstallerExited 'git-arm64'
+      Remove-TempFile "$env:TEMP\git-arm64.exe"
+      if (-not (Test-Path 'C:\Program Files\Git\cmd\git.exe')) { throw "git.exe not found after install" }
       & $choco install jq --version=${var.jq_version} -y
       if ($LASTEXITCODE -ne 0) { throw "choco jq failed: $LASTEXITCODE" }
-      & $choco install python --version=${var.python_version} -y
-      if ($LASTEXITCODE -ne 0) { throw "choco python failed: $LASTEXITCODE" }
-      & $choco install firefox curl docker-cli docker-compose -y
-      if ($LASTEXITCODE -ne 0) { throw "choco browsers/docker failed: $LASTEXITCODE" }
+      # Python — official win-arm64 installer (choco's python is x64):
+      # without it venvs/pip would default to amd64 wheels on this guest.
+      Download-Verified "https://www.python.org/ftp/python/${var.python_version}/python-${var.python_version}-arm64.exe" "$env:TEMP\python-arm64.exe" '${var.python_sha256}'
+      & "$env:TEMP\python-arm64.exe" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_launcher=0 TargetDir=C:\Python313
+      if ($LASTEXITCODE -ne 0) { throw "python installer failed: $LASTEXITCODE" }
+      Wait-InstallerExited 'python-arm64'
+      Remove-TempFile "$env:TEMP\python-arm64.exe"
+      if (-not (Test-Path 'C:\Python313\python.exe')) { throw "python.exe not found after install" }
+      # Firefox — official win-aarch64 installer (choco's firefox is x64).
+      Download-Verified "https://download.mozilla.org/?product=firefox-${var.firefox_version}-SSL&os=win64-aarch64&lang=en-US" "$env:TEMP\firefox.exe" '${var.firefox_sha256}'
+      & "$env:TEMP\firefox.exe" /S
+      if ($LASTEXITCODE -ne 0) { throw "firefox installer failed: $LASTEXITCODE" }
+      Wait-InstallerExited 'firefox'
+      Remove-TempFile "$env:TEMP\firefox.exe"
+      if (-not (Test-Path 'C:\Program Files\Mozilla Firefox\firefox.exe')) { throw "firefox.exe not found after install" }
+      & $choco install curl docker-cli docker-compose -y
+      if ($LASTEXITCODE -ne 0) { throw "choco docker failed: $LASTEXITCODE" }
 
       # C/C++ + cross-language toolchains (brought over from AdGuard's
       # build-agent-images windows2022-vs2022 / windows2022-go images).
       # VS2022 Build Tools (with its .NET/VC++ workloads) and Rust are
       # installed by their own provisioners below.
-      & $choco install golang --version=${var.go_version} -y
-      if ($LASTEXITCODE -ne 0) { throw "choco golang failed: $LASTEXITCODE" }
+      # Go — official win-arm64 toolchain (choco's golang is x64): on an
+      # ARM64 guest an x64 `go build` would default to amd64 output.
+      Download-Verified "https://go.dev/dl/go${var.go_version}.windows-arm64.zip" "$env:TEMP\go-arm64.zip" '${var.go_sha256}'
+      Expand-Archive -Path "$env:TEMP\go-arm64.zip" -DestinationPath "$env:TEMP\go-x" -Force
+      Copy-Item -Path "$env:TEMP\go-x\go" -Destination 'C:\Program Files\' -Recurse -Force
+      Remove-TempFile "$env:TEMP\go-arm64.zip"
+      Remove-TempFile "$env:TEMP\go-x"
+      if (-not (Test-Path 'C:\Program Files\go\bin\go.exe')) { throw "go.exe not found after extraction" }
       & $choco install mingw --version=${var.mingw_version} -y
       if ($LASTEXITCODE -ne 0) { throw "choco mingw failed: $LASTEXITCODE" }
       & $choco install make --version=${var.make_version} -y
@@ -490,45 +642,37 @@ build {
       if ($LASTEXITCODE -ne 0) { throw "choco llvm failed: $LASTEXITCODE" }
       & $choco install wixtoolset --version=${var.wixtoolset_version} -y
       if ($LASTEXITCODE -ne 0) { throw "choco wixtoolset failed: $LASTEXITCODE" }
+      # Ninja (the CMake generator) — parity with the mac/Ubuntu
+      # sandboxes and the AdGuard windows2022-vs2022 image. Git LFS needs
+      # no choco package: Git for Windows ships the git-lfs binary
+      # (filters are wired below), and a choco copy lands AFTER Git in
+      # PATH and only shadows it.
+      & $choco install ninja --version=${var.ninja_version} -y
+      if ($LASTEXITCODE -ne 0) { throw "choco ninja failed: $LASTEXITCODE" }
 
-      # ===== Google Chrome (CfT snapshot, hash-pinned) =====
-      # choco's googlechrome package downloads the live dl.google.com MSI,
-      # whose binary rotates with every Chrome release — the pinned hash
-      # breaks between releases (observed with 152.0.7977.54). Instead we
-      # fetch the versioned Chrome for Testing archive, verify the SHA256,
-      # and extract it into the standard install location.
-      $chromeUrl = "https://storage.googleapis.com/chrome-for-testing-public/${var.chrome_version}/win64/chrome-win64.zip"
-      $chromeZip = "$env:TEMP\chrome-win64.zip"
+      # ===== Google Chrome (official Windows ARM64 MSI) =====
+      # Chrome for Testing publishes no win-arm64 builds (its platform
+      # list is linux64/mac-arm64/mac-x64/win32/win64), so the native
+      # option is the enterprise ARM64 MSI. The URL is Google's live
+      # enterprise channel: the binary rotates with every Chrome release,
+      # so chrome_sha256 must be refreshed alongside it (the choco
+      # googlechrome package was abandoned for the same reason; CfT is
+      # used wherever a versioned arm64 archive exists).
+      Download-Verified "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi" "$env:TEMP\chrome-arm64.msi" '${var.chrome_sha256}'
+      $install = Start-Process msiexec -ArgumentList '/i', "$env:TEMP\chrome-arm64.msi", '/qn', '/norestart' -Wait -PassThru
+      if ($install.ExitCode -notin 0, 3010) { throw "chrome MSI install failed: exit code $($install.ExitCode)" }
+      Remove-TempFile "$env:TEMP\chrome-arm64.msi"
       $chromeAppDir = 'C:\Program Files\Google\Chrome\Application'
       $chromeExe = Join-Path $chromeAppDir 'chrome.exe'
-      # 202 MB over usermode networking can drop mid-transfer; retry.
-      $downloaded = $false
-      for ($try = 1; $try -le 3 -and -not $downloaded; $try++) {
-        try {
-          Invoke-WebRequest -UseBasicParsing -Uri $chromeUrl -OutFile $chromeZip -ErrorAction Stop
-          $downloaded = $true
-        } catch {
-          Write-Host "chrome download attempt $try failed: $($_.Exception.Message)"
-          if ($try -lt 3) { Start-Sleep -Seconds 10 }
-        }
-      }
-      if (-not $downloaded) { throw "chrome download failed after 3 attempts" }
-      $actual = (Get-FileHash -Path $chromeZip -Algorithm SHA256).Hash.ToLowerInvariant()
-      if ($actual -ne '${var.chrome_sha256}') {
-        throw "chrome checksum mismatch: expected ${var.chrome_sha256}, got $actual"
-      }
-      New-Item -ItemType Directory -Force -Path "$env:TEMP\chrome-x" | Out-Null
-      Expand-Archive -Path $chromeZip -DestinationPath "$env:TEMP\chrome-x" -Force
-      New-Item -ItemType Directory -Force -Path $chromeAppDir | Out-Null
-      Copy-Item -Path "$env:TEMP\chrome-x\chrome-win64\*" -Destination $chromeAppDir -Recurse -Force
-      Remove-Item -Path "$env:TEMP\chrome-x", $chromeZip -Recurse -Force
+      if (-not (Test-Path $chromeExe)) { throw "chrome.exe not found after install" }
       # Register App Paths so `start chrome` / shell launchers resolve it
       $appPaths = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe'
       New-Item -Path $appPaths -Force | Out-Null
       New-ItemProperty -Path $appPaths -Name '(Default)' -Value $chromeExe -PropertyType String -Force | Out-Null
-      if (-not (Test-Path $chromeExe)) { throw "chrome.exe not found after extraction" }
+      $pyDir = 'C:\Python' + ('${var.python_version}' -replace '\.(\d+)\.(\d+)\.(\d+)', '$1$2')
       $toolPaths = @(
         'C:\Program Files\nodejs',
+        'C:\Program Files\GitHub CLI',
         'C:\ProgramData\chocolatey\bin',
         'C:\Program Files\Git\cmd',
         'C:\Program Files\Git\bin',
@@ -536,6 +680,8 @@ build {
         'C:\Program Files\Go\bin',
         'C:\Program Files\LLVM\bin',
         'C:\Program Files\NASM',
+        "$pyDir",
+        "$pyDir\Scripts",
         # WiX 3.14.x: newer package versions install the MSI under
         # 'Program Files\WiX Toolset v3.14\bin' (older ones put the
         # binaries in the choco lib) — add both, the guards skip absent.
@@ -545,8 +691,12 @@ build {
         "$env:APPDATA\npm"
       )
       $machinePath = [System.Environment]::GetEnvironmentVariable('Path','Machine').TrimEnd(';')
+      # choco packages append their dirs with a trailing backslash (e.g.
+      # 'C:\Program Files\nodejs\'), which the exact-match check above used
+      # to double-append them — compare normalized (slash-less) entries.
+      $machineEntries = @($machinePath -split ';' | ForEach-Object { $_.TrimEnd('\') })
       foreach ($toolPath in $toolPaths) {
-        if ((Test-Path $toolPath) -and -not (($machinePath -split ';') -contains $toolPath)) {
+        if ((Test-Path $toolPath) -and -not ($machineEntries -contains $toolPath.TrimEnd('\'))) {
           $machinePath = $machinePath + ';' + $toolPath
         }
       }
@@ -559,11 +709,121 @@ build {
       jq --version
       python --version
       go version
+      # Conan — the C/C++ dependency manager (pairs with MSVC + CMake +
+      # Ninja), current release via pip (from AdGuard's windows2022-vs2022
+      # image, which installs it in a requirements.txt; ours is unpinned).
+      python -m pip install conan
+      if ($LASTEXITCODE -ne 0) { throw "pip conan failed: $LASTEXITCODE" }
+      conan --version
+      # Git LFS filters for the Administrator account (the sandbox login;
+      # git-lfs is the binary bundled with Git for Windows)
+      git lfs install
+      if ($LASTEXITCODE -ne 0) { throw "git lfs install failed: $LASTEXITCODE" }
+      git lfs version
+      ninja --version
       END
     ]
   }
 
-  # ===== Visual Studio 2022 Build Tools (MSVC + .NET SDKs + CMake + Win11 SDK) =====
+  # ===== Long paths + Developer Mode =====
+  # Same settings as AdGuard's windows2022-flutter image. Node modules, pub
+  # caches and generated code easily exceed MAX_PATH, and Windows 11 honors
+  # LongPathsEnabled natively; Developer Mode lets non-elevated accounts
+  # create the plugin/symlinks that package installers need.
+  provisioner "powershell" {
+    elevated_user     = var.winrm_username
+    elevated_password = var.winrm_password
+    inline = [<<-END
+      $ErrorActionPreference = 'Stop'
+      reg add 'HKLM\SYSTEM\CurrentControlSet\Control\FileSystem' /v LongPathsEnabled /t REG_DWORD /d 1 /f | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "reg add LongPathsEnabled failed: $LASTEXITCODE" }
+      reg add 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "reg add AllowDevelopmentWithoutDevLicense failed: $LASTEXITCODE" }
+      # Git's own companion switch: without it git truncates long paths even
+      # when the OS setting allows them.
+      git config --system core.longpaths true
+      if ($LASTEXITCODE -ne 0) { throw "git config core.longpaths failed: $LASTEXITCODE" }
+      Write-Host 'Long paths + Developer Mode enabled'
+      END
+    ]
+  }
+
+  # ===== JDK (Temurin) + JAVA_HOME =====
+  # Same requirement as AdGuard's windows2022-flutter image: Gradle/Android
+  # and package:jni-style C++ builds need a real JDK — a JRE ships jvm.dll
+  # but no jni.h/jvm.lib. JAVA_HOME is set machine-wide and the JDK bin dir
+  # goes on PATH so `java` works in any shell.
+  provisioner "powershell" {
+    elevated_user     = var.winrm_username
+    elevated_password = var.winrm_password
+    timeout           = "30m"
+    inline = [<<-END
+      $ErrorActionPreference = 'Stop'
+      $ProgressPreference = 'SilentlyContinue'
+      $chocoInstall = [System.Environment]::GetEnvironmentVariable('ChocolateyInstall','Machine')
+      if (-not $chocoInstall) { $chocoInstall = 'C:\ProgramData\chocolatey' }
+      $choco = Join-Path (Join-Path $chocoInstall 'bin') 'choco.exe'
+      if (-not (Test-Path $choco)) { throw "choco.exe not found at $choco (Chocolatey install failed?)" }
+      # JDK — official Adoptium win-aarch64 zip, hash-pinned (choco's
+      # temurin21 is x64; on this ARM64 guest the JVM would run emulated).
+      function Download-Verified([string]$url, [string]$destFile, [string]$expected) {
+        $downloaded = $false
+        for ($try = 1; $try -le 3 -and -not $downloaded; $try++) {
+          try {
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $destFile -ErrorAction Stop
+            $downloaded = $true
+          } catch {
+            Write-Host "download attempt $try failed ($url): $($_.Exception.Message)"
+            if ($try -lt 3) { Start-Sleep -Seconds 10 }
+          }
+        }
+        if (-not $downloaded) { throw "download failed after 3 attempts: $url" }
+        $actual = (Get-FileHash -Path $destFile -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+          throw "checksum mismatch for $url`n  expected $expected`n  got      $actual"
+        }
+      }
+      function Remove-TempFile([string]$path) {
+        for ($try = 1; $try -le 10; $try++) {
+          try {
+            Remove-Item -Force -Recurse -Path $path -ErrorAction Stop
+            return
+          } catch {
+            if ($try -eq 10) { throw "could not remove $${path}: $($_.Exception.Message)" }
+            Start-Sleep -Seconds 3
+          }
+        }
+      }
+      Download-Verified "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-${var.jdk_version}%2B1/OpenJDK21U-jdk_aarch64_windows_hotspot_${var.jdk_version}_1.zip" "$env:TEMP\jdk.zip" '${var.jdk_sha256}'
+      Expand-Archive -Path "$env:TEMP\jdk.zip" -DestinationPath "$env:TEMP\jdk-x" -Force
+      $srcJdk = Get-ChildItem "$env:TEMP\jdk-x" -Directory | Select-Object -First 1
+      if (-not $srcJdk) { throw "JDK zip extracted nothing" }
+      New-Item -ItemType Directory -Force -Path 'C:\Program Files\Eclipse Adoptium' | Out-Null
+      Copy-Item -Path $srcJdk.FullName -Destination "C:\Program Files\Eclipse Adoptium\jdk-${var.jdk_version}-hotspot" -Recurse -Force
+      Remove-TempFile "$env:TEMP\jdk.zip"
+      Remove-TempFile "$env:TEMP\jdk-x"
+      $jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'jdk-*' } | Sort-Object Name -Descending | Select-Object -First 1
+      if (-not $jdk) { throw 'JDK directory not found under C:\Program Files\Eclipse Adoptium' }
+      [System.Environment]::SetEnvironmentVariable('JAVA_HOME', $jdk.FullName, 'Machine')
+      foreach ($f in 'include\jni.h', 'include\win32\jni_md.h', 'lib\jvm.lib') {
+        if (-not (Test-Path (Join-Path $jdk.FullName $f))) { throw "$f is missing in $($jdk.FullName): the choco package installed a JRE instead of a JDK" }
+      }
+      $machinePath = [System.Environment]::GetEnvironmentVariable('Path','Machine').TrimEnd(';')
+      $javaBin = Join-Path $jdk.FullName 'bin'
+      if (-not (($machinePath -split ';') -contains $javaBin)) {
+        [System.Environment]::SetEnvironmentVariable('Path', $machinePath + ';' + $javaBin, 'Machine')
+      }
+      # A WinRM shell's PATH is captured when the shell starts, so this
+      # process does not see the registry update above (observed as
+      # "The term 'java' is not recognized" right after JAVA_HOME was
+      # set). Re-read the machine + user PATH, like the toolchain
+      # provisioner does, so `java` resolves for the check below.
+      $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
+      Write-Host "JAVA_HOME set to $($jdk.FullName)"
+      java -version
+      END
+    ]
+  }
   # Brought over from AdGuard's build-agent-images windows2022-base-vs2022
   # image: the choco package installs the VS bootstrapper, then setup.exe
   # adds the .NET 4.8 + .NET Core SDKs, the VC++ workload (x86/x64/ARM/
@@ -601,7 +861,9 @@ build {
           --add Microsoft.NetCore.Component.SDK `
           | Out-Host
       if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "vs .NET workloads failed: $LASTEXITCODE" }
-      # VC++ workload (x86/x64/ARM/ARM64) + CMake project support
+      # VC++ workload (x86/x64/ARM/ARM64) + CMake project support + ATL
+      # (ATL standard C++ component, as in AdGuard's windows2022-flutter
+      # image — plain CMake/ATL projects expect it)
       & $setup modify --quiet --norestart `
           --installPath 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools' `
           --add Microsoft.VisualStudio.Workload.VCTools `
@@ -609,6 +871,7 @@ build {
           --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
           --add Microsoft.VisualStudio.Component.VC.Tools.ARM `
           --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 `
+          --add Microsoft.VisualStudio.Component.VC.ATL `
           | Out-Host
       if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "vs VC++ workloads failed: $LASTEXITCODE" }
       # Windows 11 SDK (the components the Win11 toolchain expects)
@@ -654,7 +917,7 @@ build {
       if (-not $downloaded) { throw "rustup-init download failed after 3 attempts" }
       & $rustupInit -y --default-toolchain ${var.rust_version}
       if ($LASTEXITCODE -ne 0) { throw "rustup-init failed: $LASTEXITCODE" }
-      Remove-Item $rustupInit -Force
+      Remove-Item $rustupInit -Force -ErrorAction SilentlyContinue
       $cargoBin = "$env:USERPROFILE\.cargo\bin"
       $machinePath = [System.Environment]::GetEnvironmentVariable('Path','Machine').TrimEnd(';')
       if (-not (($machinePath -split ';') -contains $cargoBin)) {
@@ -688,7 +951,7 @@ build {
       }
       if (-not $downloaded) { throw "vscode download failed after 3 attempts" }
       Start-Process $installer -ArgumentList '/VERYSILENT /NORESTART /MERGETASKS=!runcode' -Wait
-      Remove-Item $installer -Force
+      Remove-Item $installer -Force -ErrorAction SilentlyContinue
       $codeBin = "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin"
       if (Test-Path $codeBin) {
         $machinePath = [System.Environment]::GetEnvironmentVariable('Path','Machine').TrimEnd(';')
@@ -749,6 +1012,10 @@ build {
         throw "npm $argsLine failed after 3 attempts"
       }
       Invoke-NpmRetry "install -g opencode-ai"
+      # Package managers for frontend/Node projects — parity with the
+      # mac/Ubuntu sandboxes (npm globals in %APPDATA%\npm, already on the
+      # machine PATH through the toolchain provisioner's $toolPaths).
+      Invoke-NpmRetry "install -g pnpm yarn"
       New-Item -ItemType Directory -Force -Path C:\npm-global | Out-Null
       Invoke-NpmRetry "install -g --prefix C:\npm-global --ignore-scripts @alibaba-group/open-code-review@${var.open_code_review_version}"
       foreach ($toolPath in @('C:\npm-global')) {
@@ -796,7 +1063,12 @@ if (Test-Path $envFile) {
     }
   }
 }
-& 'C:\Program Files\nodejs\node.exe' 'C:\Users\Administrator\AppData\Roaming\npm\node_modules\@openchamber\web\bin\cli.js' serve --foreground --port ${var.openchamber_port} --host 0.0.0.0
+# npm globals land next to the extracted node.exe (the node zip's
+      # default global prefix is its own dir, not %APPDATA%\npm), so the
+      # cli.js path must follow the shim, never a hardcoded install dir.
+      $openChamberShim = (Get-Command openchamber -ErrorAction SilentlyContinue).Source
+      if (-not $openChamberShim) { throw 'openchamber shim not found on PATH' }
+      & $openChamberShim serve --foreground --port ${var.openchamber_port} --host 0.0.0.0
 '@
       Set-Content -Path C:\tools\openchamber-startup.ps1 -Value $wrapper -Encoding UTF8
       # Register the logon task. schtasks.exe from the elevated WinRM
@@ -837,7 +1109,111 @@ if (Test-Path $envFile) {
         Where-Object { $_.DisplayName -like '*Query User*node.exe*' } |
         Remove-NetFirewallRule -ErrorAction SilentlyContinue
       New-NetFirewallRule -DisplayName 'OpenChamber' -Direction Inbound -Action Allow -Protocol TCP -LocalPort ${var.openchamber_port} -Profile Any -ErrorAction SilentlyContinue | Out-Null
+      # openchamber's startup-enable provisions an UNPINNED
+      # @alibaba-group/open-code-review at the default npm prefix (it gets
+      # shadowed on PATH by the pinned C:\npm-global copy, but `npm ls -g`
+      # then reports a non-pinned version). Remove it and re-assert the
+      # pinned copy is what `ocr` resolves to — a rebuild must not ship an
+      # ocr that is not the pinned version.
+      npm uninstall -g @alibaba-group/open-code-review 2>$null
+      if ($LASTEXITCODE -ne 0) { Write-Warning "open-code-review cleanup failed: $LASTEXITCODE" }
       $LASTEXITCODE = 0
+      $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
+      $ocrBin = (Get-Command ocr -ErrorAction SilentlyContinue).Source
+      if (-not ($ocrBin -like 'C:\npm-global*')) { throw "ocr resolved to '$ocrBin' instead of the pinned C:\npm-global copy" }
+      $ocrVersion = & ocr --version 2>$null | Select-Object -First 1
+      if ($ocrVersion -notmatch "v${var.open_code_review_version}") {
+        throw "ocr is '$ocrVersion' - expected the pinned v${var.open_code_review_version}"
+      }
+      Write-Host "ocr: $ocrVersion"
+      $LASTEXITCODE = 0
+      END
+    ]
+  }
+
+  # ===== OpenChamber desktop app (win-arm64 NSIS installer) =====
+  # Parity with the mac cask and the Ubuntu AppImage: the desktop app for
+  # the guest desktop, hash-pinned from the GitHub releases. The installer
+  # is electron-builder NSIS: /S silent, per-user install by default (the
+  # sandbox account is the installing account); the Start Menu shortcut is
+  # created by the installer itself.
+  provisioner "powershell" {
+    elevated_user     = var.winrm_username
+    elevated_password = var.winrm_password
+    timeout           = "30m"
+    inline = [<<-END
+      $ErrorActionPreference = 'Stop'
+      $ProgressPreference = 'SilentlyContinue'
+      $installer = "$env:TEMP\openchamber-setup.exe"
+      $url = "https://github.com/openchamber/openchamber/releases/download/v${var.openchamber_desktop_version}/OpenChamber-${var.openchamber_desktop_version}-win-arm64.exe"
+      $downloaded = $false
+      for ($try = 1; $try -le 3 -and -not $downloaded; $try++) {
+        try {
+          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $installer -ErrorAction Stop
+          $downloaded = $true
+        } catch {
+          Write-Host "openchamber desktop download attempt $try failed: $($_.Exception.Message)"
+          if ($try -lt 3) { Start-Sleep -Seconds 10 }
+        }
+      }
+      if (-not $downloaded) { throw "openchamber desktop download failed after 3 attempts" }
+      $actual = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+      if ($actual -ne '${var.openchamber_desktop_sha256}') {
+        throw "openchamber desktop checksum mismatch: expected ${var.openchamber_desktop_sha256}, got $actual"
+      }
+      # The NSIS win-arm64 installer can crash with 0xC0000005 (access
+      # violation) on one attempt and succeed on the next (observed during
+      # a rebuild) — retry the install, like the downloads above.
+      $installOk = $false
+      for ($try = 1; $try -le 3 -and -not $installOk; $try++) {
+        $installerProc = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+        if ($installerProc.ExitCode -in 0, 3010) { $installOk = $true; break }
+        Write-Host "openchamber desktop install attempt $try exited with code $($installerProc.ExitCode); retrying"
+        if ($try -lt 3) { Start-Sleep -Seconds 10 }
+      }
+      if (-not $installOk) { throw "openchamber desktop installer exited with code $($installerProc.ExitCode)" }
+      Remove-Item $installer -Force -ErrorAction SilentlyContinue
+      # The electron-builder NSIS install dir is derived from the npm
+      # package name, not productName (observed 2026-09-03: 1.22.0 installed
+      # to "%LOCALAPPDATA%\Programs\@openchamberelectron" because the package
+      # is "@openchamber/electron") — never hardcode it. Search every
+      # standard per-user / per-machine install root for OpenChamber.exe,
+      # then fall back to the uninstall registry InstallLocation.
+      # Start-Process -Wait can return while the NSIS child still writes the
+      # app files (observed 2026-09-04: the checksum passed and the search
+      # still came up empty) — poll briefly, then give up with diagnostics.
+      $roots = @()
+      foreach ($u in @("$env:LOCALAPPDATA\Programs", "$env:USERPROFILE\AppData\Local\Programs", 'C:\Program Files', 'C:\Program Files (x86)')) {
+        if ($u -and (Test-Path $u)) { $roots += $u }
+      }
+      $roots += Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'AppData\Local\Programs' } |
+        Where-Object { (Test-Path $_) -and -not ($roots -contains $_) }
+      $exe = $null
+      for ($try = 0; $try -lt 10 -and -not $exe; $try++) {
+        if ($try -gt 0) { Start-Sleep -Seconds 2 }
+        foreach ($root in $roots) {
+          $exe = Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'openchamber' } |
+            ForEach-Object { Get-ChildItem $_.FullName -Filter 'OpenChamber.exe' -Recurse -ErrorAction SilentlyContinue } |
+            Select-Object -First 1
+          if ($exe) { break }
+        }
+      }
+      if (-not $exe) {
+        foreach ($regKey in 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall') {
+          $entry = Get-ChildItem $regKey -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue } |
+            Where-Object { $_.DisplayName -like '*OpenChamber*' -and $_.InstallLocation } |
+            Select-Object -First 1
+          if ($entry) {
+            $exe = Get-ChildItem $entry.InstallLocation -Filter 'OpenChamber.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($exe) { break }
+          }
+        }
+      }
+      if (-not $exe) { throw "OpenChamber desktop exe not found after install (searched: $($roots -join '; '))" }
+      Write-Host "OpenChamber desktop installed at $($exe.FullName)"
       END
     ]
   }
@@ -960,11 +1336,17 @@ if (Test-Path $envFile) {
       Write-Host "PowerShell execution policy: $(Get-ExecutionPolicy -Scope LocalMachine)"
       node --version
       npm --version
+      pnpm --version
+      yarn --version
       python --version
       git --version
+      git lfs version
       gh --version
       rg --version
       jq --version
+      ninja --version
+      conan --version
+      java -version
       opencode --version
       ocr --version
       openchamber --version
@@ -997,6 +1379,8 @@ if (Test-Path $envFile) {
       Write-Host "Chrome: $(Test-Path 'C:\Program Files\Google\Chrome\Application\chrome.exe')"
       Write-Host "Firefox: $(Test-Path 'C:\Program Files\Mozilla Firefox\firefox.exe')"
       Write-Host "VS Code: $(Test-Path "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd")"
+      Write-Host "OpenChamber desktop: $(Test-Path "$env:LOCALAPPDATA\Programs\OpenChamber")"
+      Write-Host "Long paths: $(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LongPathsEnabled)"
       # Cleanup — must never fail the build: choco cleanup can exit non-zero
       # (locked files etc.) and that $LASTEXITCODE would otherwise propagate
       # as the script's exit code even though everything succeeded. The
@@ -1006,6 +1390,32 @@ if (Test-Path $envFile) {
       $LASTEXITCODE = 0
       Remove-Item -Path $env:TEMP\* -Recurse -Force -ErrorAction SilentlyContinue
       Write-Host 'Windows sandbox image complete'
+      END
+    ]
+  }
+
+  # Image identity — the image records its own name/version inside the
+  # guest (%USERPROFILE%\.config\agent-dev-env\image.json, the
+  # green-field guest marker dir), so any clone of it can answer "which
+  # image am I" without host-side provenance records. ASCII-only string
+  # literals: non-ASCII is mangled in the WinRM transfer.
+  provisioner "powershell" {
+    elevated_user     = var.winrm_username
+    elevated_password = var.winrm_password
+    inline = [<<-END
+      $ErrorActionPreference = 'Stop'
+      $identityDir = Join-Path $env:USERPROFILE '.config\agent-dev-env'
+      New-Item -ItemType Directory -Force -Path $identityDir | Out-Null
+      $identity = @"
+{
+  "image": "sandbox-windows-${var.windows_version}-arm64-qemu",
+  "image_version": "${var.image_version}",
+  "platform": "windows-qemu",
+  "windows_version": "${var.windows_version}"
+}
+"@
+      Set-Content -Path (Join-Path $identityDir 'image.json') -Value $identity -Encoding Ascii
+      Get-Content (Join-Path $identityDir 'image.json')
       END
     ]
   }

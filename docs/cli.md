@@ -59,6 +59,7 @@ Runtime requirements (host, macOS only):
 
 ```text
 agent-dev-env run <platform> [options]     # macos | windows-qemu | windows-vmware | ubuntu-vmware
+agent-dev-env start <platform> [options]   # alias of run
 agent-dev-env stop <platform>
 agent-dev-env delete <platform> [--yes] [--pristine]   # --pristine: macOS only
 agent-dev-env sync <platform> [--yes]                  # macos | ubuntu-vmware
@@ -73,12 +74,16 @@ agent-dev-env watch-build <vnc-port> [outdir]          # hidden
 
 ## run
 
+`start` is an alias of `run` — both spellings take the same arguments,
+options, and behavior.
+
 Starts — and automatically wires up — the chosen sandbox VM. On first use
 it picks the image (local build output first, then asks to pull `:latest`
 from GHCR via `oras`), creates the working VM, boots it, bridges the host's
 SSH agent and Docker engine into the guest, installs the guest-side agent
 (bridges + rules), copies your host user settings where supported
-(`macos`, `ubuntu-vmware`), and verifies OpenChamber. `--reset` wipes the
+(`macos`, `windows-qemu`, `windows-vmware`, `ubuntu-vmware`), and verifies
+OpenChamber. `--reset` wipes the
 working VM and starts fresh from the pristine image; the pristine image is
 never written to.
 
@@ -89,9 +94,9 @@ below):
 | --- | --- | --- | --- | --- |
 | Hypervisor | Tart | QEMU + HVF | VMware Fusion | VMware Fusion |
 | Default image | `sandbox-macos-tahoe` | `sandbox-windows-11-arm64-qemu` | `sandbox-windows-11-arm64-vmware` | `sandbox-ubuntu-24-04-arm64-vmware` |
-| Default VM | `sandbox-macos` | `sandbox-windows-11-arm64-qemu` | `agent-dev-env-windows-11-arm64-vmware` | `agent-dev-env-ubuntu-24-04-arm64-vmware` |
+| Default instance | `default-agent-dev-env` | `default-agent-dev-env` | `default-agent-dev-env` | `default-agent-dev-env` |
 | Shared host dir | `--work-dir` (Tart mount) | — | skipped (unsupported for Win11 ARM) | `--work-dir` (HGFS) |
-| Settings copy | yes | — | — | yes |
+| Settings copy | yes | yes | yes | yes |
 | Agent rules | yes | — | — | yes |
 | Guest access | NAT IP:4000 | `127.0.0.1:2222` / `3389` / `4000` | NAT IP:22 / `3389` / `4000` | NAT IP:22 / `4000` |
 | Agent bridge port | `4100` | `4200` | `4300` | `4400` |
@@ -111,7 +116,7 @@ Options:
 - `--no-agent` — skip the SSH agent bridge setup.
 - `--no-docker` — skip the Docker engine bridge setup.
 - `--no-settings` — skip copying the host user settings into the guest
-  (`macos`, `ubuntu-vmware`).
+  (all four platforms).
 - `--work-dir <path>` — host directory to share into the guest; overrides
   `SANDBOX_WORK_DIR`. macOS mounts it under
   `/Volumes/My Shared Files/<mount-name>`; Ubuntu under
@@ -119,12 +124,46 @@ Options:
   (unsupported for Windows 11 ARM guests).
 - `--reset` — delete the working VM state (working clone / COW overlay /
   TPM / EFI NVRAM) and start fresh from the pristine image. Everything
-  inside the guest is lost.
+  inside the guest is lost; the pristine image cache (shared across
+  instances) is kept.
 - `--image <image>` — pristine image to pull/clone from
   (`SANDBOX_IMAGE`).
 - `--owner <owner>` — GHCR owner for pulls (`GHCR_OWNER`; defaults to
   the git remote, then `ameshkov`).
 - `--yes` — skip confirmation prompts.
+
+### Sandbox instances
+
+Every platform runs sandboxes as *instances* of a pristine image: the
+image is downloaded/extracted once into a shared cache
+(`<data>/<platform>/<image>/image/…`), and each instance gets its own
+working state (`working/<instance>/`: the VMware clone or QEMU COW
+overlay + TPM + EFI NVRAM, pidfiles, and provenance records). The
+instance name is set via `SANDBOX_VM` (default
+`default-agent-dev-env`) and must be strict kebab-case
+(`[a-z0-9][a-z0-9-]*`) — it is a path segment and a Tart VM name, so no
+dots, slashes, or uppercase.
+
+```bash
+SANDBOX_VM=project-a agent-dev-env run ubuntu-vmware
+SANDBOX_VM=project-b agent-dev-env run ubuntu-vmware   # side by side
+```
+
+`run`/`stop`/`delete`/`sync`/`status` all resolve the instance through
+the same `SANDBOX_VM` env var, so one export describes one sandbox:
+
+```bash
+export SANDBOX_VM=project-a
+agent-dev-env run macos
+agent-dev-env status macos
+agent-dev-env stop macos
+```
+
+With no `SANDBOX_VM` set, `status` lists every instance that has working
+state. Because the host bridge ports are per-platform, two instances of
+the same platform running at once need distinct ports — the bridge setup
+refuses to reuse a bridge owned by a different instance and tells you
+which `SANDBOX_*_PORT` to override (see the env table).
 
 The runner prints a live status line (bridges + OpenChamber) while it
 works, then a summary: VM/Guest IP, shared directory, SSH agent and Docker
@@ -150,11 +189,13 @@ Stops the sandbox first, then removes it:
 
 - macOS: `tart delete` the working VM; with `--pristine` (or `--yes` at
   the pristine prompt, default no) the pristine image is deleted too.
-- QEMU / VMware: removes the platform's state dir under the data root
-  (extracted base + working clone, or overlay + TPM + EFI NVRAM, plus the
-  pulled image cache) — the next run re-pulls the archive and re-clones.
-  Fusion's VM library may still list the deleted working VM — remove the
-  stale entry in the Fusion UI (harmless).
+- QEMU / VMware: removes the instance's state dir under the data root
+  (`working/<instance>/`: the extracted base's working clone, or the
+  overlay with its TPM and EFI NVRAM). The shared pristine image cache is
+  dropped only when the last instance is deleted — otherwise it stays for
+  the other instances. The next run re-clones the instance. Fusion's VM
+  library may still list the deleted working VM — remove the stale entry
+  in the Fusion UI (harmless).
 
 Options:
 
@@ -163,20 +204,28 @@ Options:
 
 ## sync
 
-Copies the host's user settings into the guest on demand (`macos`,
-`ubuntu-vmware`) — the same files the runner copies, always, regardless of
+Copies the host's user settings into the guest on demand (all four
+platforms) — the same files the runner copies, always, regardless of
 the version marker. The VM must be running (start it with `run` first). It
 restarts OpenChamber so the new settings take effect, and updates the
 guest's settings marker so the runner won't re-offer the copy on its next
-run. `--yes` skips the confirmation prompt. Windows platforms have no
-settings step — `sync` errors helpfully there.
+run. `--yes` skips the confirmation prompt.
 
 ## status
 
 Live status of one or all platforms: the image, whether the pristine /
 working state exists, and the running state (Tart VM state, qemu pidfile
-with a pgrep fallback, VMX existence + guest IP where available). With no
-argument it summarizes all platforms; `status <platform>` narrows to one.
+with a pgrep fallback, VMX existence + guest IP where available). It also
+surfaces image provenance where recorded — the `image source:` line (the
+GHCR ref + digest the image was pulled from) and the `clone source:` line
+(what the working VM was cloned from, when, and whether the record was
+backfilled for a VM cloned before provenance tracking).
+
+`status` resolves the sandbox instance from `SANDBOX_VM` (default
+`default-agent-dev-env`), like `run`/`stop`/`delete`/`sync`; with
+`SANDBOX_VM` unset it additionally lists every instance with working
+state, one `VM:` line per instance. With no argument it summarizes all
+platforms; `status <platform>` narrows to one.
 
 ## list
 
@@ -212,7 +261,10 @@ Options:
 
 ## deploy
 
-Pushes locally built images to GHCR after confirming the image and owner:
+Pushes locally built images to GHCR after confirming the image and owner.
+Without arguments it deploys every image; pass image names to deploy a
+subset. `agent-dev-env deploy --help` lists the available images (the
+same catalog `build --help` shows):
 
 - macOS: `tart push --chunk-size 3` — version tag + `:latest`;
 - windows-qemu: `oras push` of the qcow2 as the
@@ -263,7 +315,7 @@ so existing invocations keep working:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `SANDBOX_IMAGE` | per platform | Pristine image to pull/clone from (`--image`) |
-| `SANDBOX_VM` | per platform | Working VM name (macOS) |
+| `SANDBOX_VM` | `default-agent-dev-env` | Sandbox instance name — one working VM/state per name, all platforms |
 | `SANDBOX_WORK_DIR` | per platform | Host directory shared into the guest; empty disables the mount |
 | `SANDBOX_MOUNT_NAME` | `dev` | Mount name in the guest (macOS: `/Volumes/My Shared Files/<name>`) |
 | `SANDBOX_AGENT_PORT` | `4100`/`4200`/`4300`/`4400` | TCP port for the SSH agent bridge |
@@ -309,15 +361,27 @@ Data layout:
                                + staged drivers; deploy consumes these)
   build-context/<platform>/    materialized packer context (writable copy of
                                images/<platform>)
-  windows-qemu/<image>/        image/ (pristine qcow2), working/ (overlay,
-                               efivars.fd, tpm/, pids, sockets)
-  windows-vmware/<image>/      image/, base/, working/
-  ubuntu-vmware/<image>/       image/, base/, working/
+  macos/<image>/               provenance records only (working/<instance>/clone.json
+                               + image.json; Tart owns the VM itself)
+  windows-qemu/<image>/        image/ (pristine qcow2), working/<instance>/ (overlay,
+                               efivars.fd, tpm/, pids, sockets, clone.json),
+                               image.json
+  windows-vmware/<image>/      image/, base/, working/<instance>/, provenance records
+  ubuntu-vmware/<image>/       image/, base/, working/<instance>/, provenance records
 ```
 
-- macOS has no data footprint: Tart owns the pristine image and the
-  working VM; only the logs root (`tart-*.log`) is the CLI's.
+- macOS has no VM-state footprint: Tart owns the pristine image and the
+  working VM; only the provenance records and the logs root (`tart-*.log`)
+  are the CLI's.
+- The pristine image cache (`image/`, `base/`) is shared across all
+  instances of an image — one download/extraction serves every
+  `SANDBOX_VM`. Each instance's mutable state lives in
+  `working/<instance>/`.
+- Provenance records (`clone.json` + `image.json`) are best-effort and
+  never fatal — see
+  `packages/agent-dev-env-cli/src/lib/provenance.ts`; `status` and the run
+  summaries surface them.
 - Guest-side markers live under `~/.config/agent-dev-env/` (settings
-  version, agent-rules sha256).
+  version, agent-rules sha256, the baked image identity `image.json`).
 - No host config file in v1 — env vars and flags only. `XDG_CONFIG_HOME`
   is a documented future hook.

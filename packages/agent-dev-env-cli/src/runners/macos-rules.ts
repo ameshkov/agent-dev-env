@@ -9,7 +9,12 @@ import { logger } from '../lib/logger.js';
 import { confirmDefault } from '../lib/prompt.js';
 import type { RunContext, RunState } from './framework.js';
 import { GUEST_AGENT } from './macos-guest.js';
-import { loadAgentRules, renderAgentRules } from './rules.js';
+import {
+  loadAgentRules,
+  loadHostGlobalAgents,
+  mergeAgentRules,
+  renderAgentRules,
+} from './rules.js';
 
 /** The agent-rules probe/confirm/apply.
  *
@@ -33,15 +38,16 @@ export async function installAgentRules(
     { HOST_WORK_DIR: context.workDir, GUEST_MOUNT: context.guestMount },
     state.bridges.agent.bridged && state.bridges.agent.guestUp,
   );
+  const merged = mergeAgentRules(loadHostGlobalAgents(), rendered);
 
-  const probe = await execVm(context.vm, [node, GUEST_AGENT, 'rules'], { input: rendered });
+  const probe = await execVm(context.instance, [node, GUEST_AGENT, 'rules'], { input: merged });
   const action = /^rules:probe=(.+)$/.exec(probe.stdout.trim())?.[1];
   if (probe.code !== 0 || !action) {
     logger.warn('could not inspect the agent rules in the guest.');
     state.rules = 'failed';
     return;
   }
-  await applyRulesAction(context, state, node, rendered, action);
+  await applyRulesAction(context, state, node, merged, action);
 }
 
 /** The probe outcome decision tree (shell parity: install/update ask
@@ -79,7 +85,7 @@ async function applyRulesAction(
     state.rules = 'kept';
     return;
   }
-  const write = await execVm(context.vm, [node, GUEST_AGENT, 'rules', '--force'], {
+  const write = await execVm(context.instance, [node, GUEST_AGENT, 'rules', '--force'], {
     input: rendered,
   });
   if (write.code !== 0) {

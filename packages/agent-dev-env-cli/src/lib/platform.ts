@@ -19,8 +19,6 @@ export const PLATFORM_DIR_MAP: Record<string, Platform> = {
 export interface PlatformDefaults {
   /** Default image name (catalog default; --image/SANDBOX_IMAGE override). */
   image: string;
-  /** Default working VM name / Fusion display name. */
-  vmName: string;
   /** Dir name under the data root. */
   stateDir: string;
   /** TCP ports for the bridges/guest services (SANDBOX_* overrides). */
@@ -48,7 +46,6 @@ export interface PlatformDefaults {
 export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
   macos: {
     image: 'sandbox-macos-tahoe',
-    vmName: 'sandbox-macos',
     stateDir: 'macos',
     agentPort: 4100,
     dockerPort: 4101,
@@ -65,7 +62,6 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
   },
   'windows-qemu': {
     image: 'sandbox-windows-11-arm64-qemu',
-    vmName: 'sandbox-windows-11-arm64-qemu',
     stateDir: 'windows-qemu',
     agentPort: 4200,
     dockerPort: 4201,
@@ -76,14 +72,13 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
     cpuCount: 4,
     memoryMb: 8192,
     supportsAgentRules: false,
-    supportsSettings: false,
-    supportsSync: false,
+    supportsSettings: true,
+    supportsSync: true,
     supportsPristineDelete: false,
     downloadHint: '~14 GB',
   },
   'windows-vmware': {
     image: 'sandbox-windows-11-arm64-vmware',
-    vmName: 'agent-dev-env-windows-11-arm64-vmware',
     stateDir: 'windows-vmware',
     agentPort: 4300,
     dockerPort: 4301,
@@ -91,14 +86,13 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
     cpuCount: 4,
     memoryMb: 8192,
     supportsAgentRules: false,
-    supportsSettings: false,
-    supportsSync: false,
+    supportsSettings: true,
+    supportsSync: true,
     supportsPristineDelete: false,
     downloadHint: '~20 GB',
   },
   'ubuntu-vmware': {
     image: 'sandbox-ubuntu-24-04-arm64-vmware',
-    vmName: 'agent-dev-env-ubuntu-24-04-arm64-vmware',
     stateDir: 'ubuntu-vmware',
     agentPort: 4400,
     dockerPort: 4401,

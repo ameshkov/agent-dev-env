@@ -11,6 +11,7 @@ import { logger } from '../lib/logger.js';
 import { findHostAlias } from '../lib/network.js';
 import { openSshSession, type SshSession } from '../lib/ssh.js';
 import { findHostAgentSocket, findHostDockerSocket, startHostBridge } from './bridges.js';
+import { bridgeConflictMessage } from './bridges.js';
 import type { RunContext, RunState } from './framework.js';
 import {
   ensureGuestAgent,
@@ -118,7 +119,7 @@ async function setupDockerBridge(
 
 /** The shared bridge start: the host spawn + state bookkeeping (the
  *  shell's start_host_bridge; pidfile + detached bridge.js via
- *  runners/bridges.ts — no socat). Returns false when skipped.
+ *  runners/bridges.ts — no socat). Returns false when skipped/conflicted.
  */
 async function startBridge(
   context: RunContext,
@@ -127,12 +128,17 @@ async function startBridge(
   socket: string,
   hostAlias: string,
 ): Promise<boolean> {
+  const port = role === 'ssh-agent' ? context.agentPort : context.dockerPort;
   const result = await startHostBridge({
     role,
     bindHost: hostAlias,
-    port: role === 'ssh-agent' ? context.agentPort : context.dockerPort,
+    port,
     forwardSocket: socket,
+    instance: context.instance,
   });
+  if (result.state === 'conflict') {
+    logger.die(bridgeConflictMessage(role, context.instance, port));
+  }
   if (result.state === 'failed') {
     logger.warn(`skipping the ${role === 'ssh-agent' ? 'SSH agent' : 'Docker'} bridge.`);
     return false;

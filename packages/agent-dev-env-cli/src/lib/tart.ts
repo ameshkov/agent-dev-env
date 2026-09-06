@@ -211,11 +211,64 @@ export function deleteVm(vm: string): Promise<RunResult> {
  * @param vm - The VM name (must be running).
  * @param argv - The command + args to run inside the guest.
  * @param options - `input` (implies `-i`) + run() overrides.
- * @returns The raw result.
+ * @returns The raw result (non-zero on failure, caller decides).
  */
 export function execVm(vm: string, argv: string[], options: RunOptions = {}): Promise<RunResult> {
   const interactive = options.input !== undefined ? ['-i'] : [];
   return run('tart', ['exec', ...interactive, vm, ...argv], options);
+}
+
+/** The Tart guest agent's launchd unit label in a Cirrus base image guest:
+ *  a global agent in the console user's GUI domain — it owns the vdagent
+ *  (clipboard) link and the `tart exec` RPC server. The root daemon
+ *  (`--run-daemon`) has no clipboard access, so only this unit matters. */
+const GUEST_AGENT_LABEL = 'org.cirruslabs.tart-guest-agent';
+
+/** @internal — The restart command for `tart exec` (exported for the
+ *  co-located unit tests; production goes through kickstartGuestAgent()).
+ *  Kicks the guest agent in the running user's GUI domain — the agent
+ *  must run under the GUI user for pasteboard access.
+ *
+ * @returns The shell command to run inside the guest.
+ */
+export function guestAgentKickstartCommand(): string {
+  return `launchctl kickstart -k gui/$(id -u)/${GUEST_AGENT_LABEL}`;
+}
+
+/** Kicks the running guest's Tart guest agent via launchctl so its
+ *  vdagent channel is re-established. Clipboard sharing can silently go
+ *  stale across VM stop/start cycles while the agent process stays up —
+ *  a fresh kick reconnects the vdagent link every time.
+ *
+ *  The restart kills the RPC server the `tart exec` call itself rides
+ *  on, so it usually returns non-zero (or dies at the timeout) even when
+ *  the restart worked — callers must wait for the agent to come back
+ *  (waitForGuestAgent) before using `tart exec` again.
+ *
+ * @param vm - The VM name (must be running).
+ * @returns The raw result (non-zero on failure, caller decides).
+ */
+export function kickstartGuestAgent(vm: string): Promise<RunResult> {
+  return execVm(vm, ['sh', '-lc', guestAgentKickstartCommand()], { timeoutMs: 10000 });
+}
+
+/** Polls the guest agent's `tart exec` RPC until it answers again after a
+ *  kickstart — the RPC server exists only in the `--run-agent` instance.
+ *
+ * @param vm - The VM name (must be running).
+ * @param tries - Poll attempts (10 = up to ~10 s).
+ * @param delayMs - Delay between attempts.
+ * @returns True when `tart exec` answers again.
+ */
+export async function waitForGuestAgent(vm: string, tries = 10, delayMs = 1000): Promise<boolean> {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    const res = await execVm(vm, ['sh', '-lc', 'echo ready']);
+    if (res.code === 0 && res.stdout.trim() === 'ready') {
+      return true;
+    }
+    await sleep(delayMs);
+  }
+  return false;
 }
 
 /** Reports the path of the node binary inside a running guest.

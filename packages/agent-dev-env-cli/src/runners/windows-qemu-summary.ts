@@ -6,7 +6,8 @@
 // 127.0.0.1, unlike the VMware backends' direct guest-IP lines.
 
 import { logger } from '../lib/logger.js';
-import { qemuLogPath, qemuPidFile, qemuStateDir } from '../lib/qemu.js';
+import { cloneSourceLine } from '../lib/provenance.js';
+import { qemuLogPath, qemuPidFile, qemuWorkingDir } from '../lib/qemu.js';
 import type { RunContext, RunState } from './framework.js';
 import { resolveGuestCredentials } from './windows-guest.js';
 
@@ -26,6 +27,7 @@ export async function printQemuSummary(context: RunContext, state: RunState): Pr
 
   logger.step('Sandbox is ready');
   summaryLine('Image:', state.imageArchive ?? 'not available');
+  summaryLine('Image source:', cloneSourceLine('windows-qemu', context.image, context.instance));
   summaryLine(
     'SSH:',
     `ssh -p ${context.sshPort} ${creds.username}@127.0.0.1 (password: ${creds.password})`,
@@ -33,10 +35,11 @@ export async function printQemuSummary(context: RunContext, state: RunState): Pr
   summaryLine('RDP:', `127.0.0.1:${context.rdpPort} (${creds.username} / ${creds.password})`);
   summaryLine('WinRM:', `127.0.0.1:${context.winrmPort} (advanced use)`);
   printBridgeLines(context, state);
+  printSettingsLine(state.settings);
   printOpenchamberLine(context, state);
   summaryLine(
     'State:',
-    `${qemuStateDir(context.image)} (overlay + TPM + EFI NVRAM; --reset wipes it)`,
+    `${qemuWorkingDir(context.image, context.instance)} (overlay + TPM + EFI NVRAM; --reset wipes it)`,
   );
   printStopLines(context, state);
 }
@@ -81,6 +84,31 @@ function printBridgeLines(context: RunContext, state: RunState): void {
   }
 }
 
+function printSettingsLine(settings: RunState['settings']): void {
+  switch (settings) {
+    case 'copied':
+      summaryLine('Settings:', loggerOk('host user settings copied into the guest'));
+      break;
+    case 'uptodate':
+      summaryLine('Settings:', 'already in the guest');
+      break;
+    case 'skipped':
+      summaryLine('Settings:', 'not copied (--no-settings)');
+      break;
+    case 'declined':
+      summaryLine('Settings:', 'not copied (declined)');
+      break;
+    case 'none':
+      summaryLine('Settings:', 'no host settings found');
+      break;
+    case 'failed':
+      summaryLine('Settings:', loggerWarn('copy failed — re-run to retry'));
+      break;
+    default:
+      summaryLine('Settings:', 'not copied');
+  }
+}
+
 function printOpenchamberLine(context: RunContext, state: RunState): void {
   if (state.openchamberUp && state.openchamberUrl) {
     summaryLine('OpenChamber:', loggerOk(`${state.openchamberUrl} (password: sandbox)`));
@@ -95,12 +123,12 @@ function printOpenchamberLine(context: RunContext, state: RunState): void {
 function printStopLines(context: RunContext, state: RunState): void {
   summaryLine(
     'Stop:',
-    `agent-dev-env stop windows-qemu (or: kill $(cat ${qemuPidFile(context.image)}))`,
+    `agent-dev-env stop windows-qemu (or: kill $(cat ${qemuPidFile(context.image, context.instance)}))`,
   );
   if (!context.options.foreground) {
     summaryLine(
       'Background:',
-      `VM keeps running after this CLI exits (qemu log: ${qemuLogPath()})`,
+      `VM keeps running after this CLI exits (qemu log: ${qemuLogPath(context.instance)})`,
     );
     if (state.bridges.agent.bridged) {
       summaryLine(

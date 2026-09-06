@@ -40,18 +40,19 @@ export async function stopCmd(platform: Platform): Promise<number> {
 export async function stopQemuSandbox(): Promise<void> {
   const options = resolveRunOptions('windows-qemu');
   const image = options.image;
+  const instance = options.instance;
 
-  logger.title(`Stopping Windows QEMU sandbox: ${image}`);
+  logger.title(`Stopping Windows QEMU sandbox: ${image} (${instance})`);
 
   logger.step('Stopping qemu');
-  await stopQemu(image);
+  await stopQemu(image, instance);
 
   logger.step('Stopping swtpm');
-  await stopSwtpm(image);
+  await stopSwtpm(image, instance);
 
   logger.step('Host bridges (SSH agent, Docker)');
-  await stopBridgeForPort('ssh-agent', options.agentPort);
-  await stopBridgeForPort('docker', options.dockerPort);
+  await stopBridgeForPort('ssh-agent', options.agentPort, instance);
+  await stopBridgeForPort('docker', options.dockerPort, instance);
 
   logger.step('Sandbox stopped');
 }
@@ -61,18 +62,18 @@ export async function stopQemuSandbox(): Promise<void> {
 export async function stopMacos(): Promise<void> {
   const options = resolveRunOptions('macos');
   requireTart();
-  const { vm } = options;
+  const { instance } = options;
 
-  logger.title(`Stopping macOS sandbox: ${vm}`);
-  await stopTartVm(vm);
+  logger.title(`Stopping macOS sandbox: ${instance}`);
+  await stopTartVm(instance);
 
   logger.step('Host bridges (SSH agent, Docker)');
-  await stopBridgeForPort('ssh-agent', options.agentPort);
-  await stopBridgeForPort('docker', options.dockerPort);
+  await stopBridgeForPort('ssh-agent', options.agentPort, instance);
+  await stopBridgeForPort('docker', options.dockerPort, instance);
 
-  const state = (await vmState(vm)) ?? 'stopped';
+  const state = (await vmState(instance)) ?? 'stopped';
   logger.step('Sandbox stopped');
-  logger.out(`    ${'VM'.padEnd(12)}${logger.bold(vm)} (${state})`);
+  logger.out(`    ${'VM'.padEnd(12)}${logger.bold(instance)} (${state})`);
   logger.out(
     `    ${'Bridges'.padEnd(12)}host listeners on TCP ${options.agentPort} and ` +
       `${options.dockerPort} stopped`,
@@ -87,14 +88,14 @@ export async function stopMacos(): Promise<void> {
 export async function stopVmware(platform: Platform): Promise<void> {
   const options = resolveRunOptions(platform);
   requireVmrun();
-  const vmx = workingVmxPath(platform, options.image);
+  const vmx = workingVmxPath(platform, options.image, options.instance);
 
   logger.title(`${platform === 'ubuntu-vmware' ? 'Ubuntu' : 'Windows'} VMware sandbox: ${vmx}`);
   await stopVmwareVmx(vmx);
 
   logger.step('Host bridges (SSH agent, Docker)');
-  await stopBridgeForPort('ssh-agent', options.agentPort);
-  await stopBridgeForPort('docker', options.dockerPort);
+  await stopBridgeForPort('ssh-agent', options.agentPort, options.instance);
+  await stopBridgeForPort('docker', options.dockerPort, options.instance);
 
   const running = await isVmRunning(vmx);
   logger.step('Sandbox stopped');
@@ -156,8 +157,8 @@ async function stopVmwareVmx(vmx: string): Promise<void> {
 /** Kills the bridge we manage on the port (pidfile first), otherwise
  *  reports the listener state like the legacy stop script.
  */
-async function stopBridgeForPort(role: BridgeRole, port: number): Promise<void> {
-  const pid = await stopHostBridge(role);
+async function stopBridgeForPort(role: BridgeRole, port: number, instance: string): Promise<void> {
+  const pid = await stopHostBridge(role, port, instance);
   if (pid !== undefined) {
     logger.ok(`Stopped the host bridge on TCP ${port} (pid ${pid}).`);
     return;

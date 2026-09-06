@@ -7,8 +7,16 @@
 
 import { sleep } from '../lib/exec.js';
 import { logger } from '../lib/logger.js';
-import { execVm, findGuestNode, gatewayFromVmIp, vmIp } from '../lib/tart.js';
+import {
+  execVm,
+  findGuestNode,
+  gatewayFromVmIp,
+  kickstartGuestAgent,
+  vmIp,
+  waitForGuestAgent,
+} from '../lib/tart.js';
 import { findHostAgentSocket, findHostDockerSocket, startHostBridge } from './bridges.js';
+import { bridgeConflictMessage } from './bridges.js';
 import type { RunContext, RunState } from './framework.js';
 import { ensureGuestAgent, readGuestStatus } from './macos-guest.js';
 import { installAgentRules } from './macos-rules.js';
@@ -18,7 +26,8 @@ import { installAgentRules } from './macos-rules.js';
  *  idempotent), then each bridge is wired independently.
  */
 export async function macosBridges(context: RunContext, state: RunState): Promise<void> {
-  const node = await findGuestNode(context.vm);
+  await restartGuestAgent(context.instance);
+  const node = await findGuestNode(context.instance);
   if (!node) {
     logger.warn('node not found in the guest — skipping the guest bridges and rules.');
     return;
@@ -39,13 +48,34 @@ export async function macosBridges(context: RunContext, state: RunState): Promis
   await installAgentRules(context, state, node);
 }
 
+/** Restarts the Tart guest agent in the running VM (step-3 prologue). The
+ *  agent's vdagent link — which powers clipboard sharing and `tart exec`
+ *  — can silently go stale across VM stop/start cycles while the process
+ *  stays up, so every run kicks it once before the RPC-backed steps
+ *  below. The kick itself rides on the RPC it kills; wait it out, and a
+ *  stuck restart is never fatal (the bridges degrade with a warning).
+ *
+ * @param instance - The working VM name.
+ */
+async function restartGuestAgent(instance: string): Promise<void> {
+  logger.info(`Restarting the Tart guest agent in '${instance}' (clipboard sharing + tart exec).`);
+  await kickstartGuestAgent(instance);
+  if (await waitForGuestAgent(instance)) {
+    logger.ok('Tart guest agent restarted.');
+  } else {
+    logger.warn(
+      'Tart guest agent did not come back in time — clipboard sharing may be unavailable.',
+    );
+  }
+}
+
 /** The host's address on Tart's VM network (`.1` of the VM's /24),
  *  retrying the IP fetch — it can fail right after boot.
  */
 async function resolveGateway(context: RunContext, state: RunState): Promise<string | undefined> {
   let ip = state.vmIp;
   for (let attempt = 0; attempt < 5 && !ip; attempt += 1) {
-    ip = await vmIp(context.vm);
+    ip = await vmIp(context.instance);
     if (!ip) {
       await sleep(2000);
     }
@@ -69,7 +99,7 @@ async function setupSshAgent(context: RunContext, state: RunState, node: string)
   }
   logger.ok(`Host SSH agent socket found: ${sock}`);
   logger.info(
-    `Bridging it into '${context.vm}' on TCP port ${context.agentPort} (see docs/ssh-agent.md).`,
+    `Bridging it into '${context.instance}' on TCP port ${context.agentPort} (see docs/ssh-agent.md).`,
   );
 
   if (!(await startBridge(context, state, 'ssh-agent', sock))) {
@@ -97,7 +127,7 @@ async function setupDockerBridge(
     return;
   }
   logger.ok(`Host Docker engine socket found: ${sock}`);
-  logger.info(`Bridging it into '${context.vm}' on TCP port ${context.dockerPort}.`);
+  logger.info(`Bridging it into '${context.instance}' on TCP port ${context.dockerPort}.`);
 
   if (!(await startBridge(context, state, 'docker', sock))) {
     return;
@@ -115,7 +145,7 @@ async function setupDockerBridge(
 }
 
 /** The shared bridge start: gateway resolution + host spawn + state
- *  bookkeeping. Returns false when the bridge was skipped.
+ *  bookkeeping. Returns false when the bridge was skipped or conflicted.
  */
 async function startBridge(
   context: RunContext,
@@ -125,15 +155,22 @@ async function startBridge(
 ): Promise<boolean> {
   const gateway = await resolveGateway(context, state);
   if (!gateway) {
-    logger.warn(`could not determine the host gateway address ('tart ip ${context.vm}' failed).`);
+    logger.warn(
+      `could not determine the host gateway address ('tart ip ${context.instance}' failed).`,
+    );
     return false;
   }
+  const port = role === 'ssh-agent' ? context.agentPort : context.dockerPort;
   const result = await startHostBridge({
     role,
     bindHost: gateway,
-    port: role === 'ssh-agent' ? context.agentPort : context.dockerPort,
+    port,
     forwardSocket: socket,
+    instance: context.instance,
   });
+  if (result.state === 'conflict') {
+    logger.die(bridgeConflictMessage(role, context.instance, port));
+  }
   if (result.state === 'failed') {
     logger.warn(`skipping the ${role === 'ssh-agent' ? 'SSH agent' : 'Docker'} bridge.`);
     return false;
@@ -152,7 +189,7 @@ async function startBridge(
 async function verifyGuestDocker(context: RunContext, state: RunState): Promise<void> {
   const probe = 'export PATH="/opt/homebrew/bin:$PATH"; docker info --format "{{.ServerVersion}}"';
   for (let attempt = 0; attempt < 15; attempt += 1) {
-    const res = await execVm(context.vm, ['sh', '-c', probe]);
+    const res = await execVm(context.instance, ['sh', '-c', probe]);
     const version = res.code === 0 ? res.stdout.trim() : '';
     if (version) {
       state.bridges.docker.serverVersion = version;

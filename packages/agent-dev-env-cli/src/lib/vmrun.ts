@@ -390,7 +390,12 @@ export async function upgradeVmHardware(
   const before = vmwareHwVersion(vmx);
   const { cmd, argv } = vmrunCommand(['upgradevm', vmx], options);
   try {
-    await withTimeout(run(cmd, argv), 180_000, 'vmrun upgradevm timed out');
+    // timeoutMs both rejects after 180 s AND SIGKILLs the child: a
+    // bare withTimeout(run(...)) only raced the promise, so the
+    // never-exiting vmrun child stayed alive holding the CLI's stdio
+    // pipes — node's event loop never drained and the CLI hung after
+    // printing the successful build summary.
+    await withTimeout(run(cmd, argv, { timeoutMs: 180_000 }), 180_000, 'vmrun upgradevm timed out');
   } catch {
     // upgradevm never exits — the timeout is expected; the vmx is
     // written before it blocks.

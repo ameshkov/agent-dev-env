@@ -9,7 +9,12 @@ import { logger } from '../lib/logger.js';
 import { confirmDefault } from '../lib/prompt.js';
 import type { SshSession } from '../lib/ssh.js';
 import type { RunContext, RunState } from './framework.js';
-import { loadAgentRules, renderAgentRules } from './rules.js';
+import {
+  loadAgentRules,
+  loadHostGlobalAgents,
+  mergeAgentRules,
+  renderAgentRules,
+} from './rules.js';
 import { GUEST_AGENT } from './ubuntu-guest.js';
 
 /** The rules asset for Ubuntu (vs agent-rules.md on macOS). */
@@ -47,9 +52,10 @@ export async function installLinuxAgentRules(
     },
     state.bridges.agent.bridged && state.bridges.agent.guestUp,
   );
+  const merged = mergeAgentRules(loadHostGlobalAgents(), rendered);
 
   const probe = await session.exec(`${node} ${GUEST_AGENT} rules`, {
-    input: rendered,
+    input: merged,
   });
   const action = /^rules:probe=(.+)$/.exec(probe.stdout.trim())?.[1];
   if (probe.code !== 0 || !action) {
@@ -57,7 +63,7 @@ export async function installLinuxAgentRules(
     state.rules = 'failed';
     return;
   }
-  await applyRulesAction(context, state, session, node, rendered, action);
+  await applyRulesAction(context, state, session, node, merged, action);
 }
 
 /** The probe outcome decision tree (shell parity: install/update ask

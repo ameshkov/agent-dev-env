@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { dirArg, gatewayFromVmIp, parseTartList, tartRunArgs, tartSetArgs } from './tart.js';
+import {
+  dirArg,
+  gatewayFromVmIp,
+  guestAgentKickstartCommand,
+  parseTartList,
+  tartRunArgs,
+  tartSetArgs,
+} from './tart.js';
 
 const LIST_OUTPUT = [
   'Source Name Disk Used Access Time State',
@@ -85,5 +92,13 @@ describe('tartSetArgs', () => {
 describe('dirArg', () => {
   it('joins mount name and host dir with :', () => {
     expect(dirArg('dev', '/Volumes/dev')).toBe('--dir=dev:/Volumes/dev');
+  });
+});
+
+describe('guestAgentKickstartCommand', () => {
+  it('kickstarts the guest agent unit in the running user GUI domain', () => {
+    expect(guestAgentKickstartCommand()).toBe(
+      'launchctl kickstart -k gui/$(id -u)/org.cirruslabs.tart-guest-agent',
+    );
   });
 });

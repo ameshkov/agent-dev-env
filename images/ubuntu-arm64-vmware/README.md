@@ -97,10 +97,14 @@ build no files and have no such directory.
 | Ubuntu Server 24.04 LTS (ARM64) | Point release from the vars file; LVM over the whole disk |
 | open-vm-tools | From the Ubuntu archive (Fusion ships no Linux tools for arm64); enables `vmrun getGuestIPAddress`, soft power ops, HGFS shared folders |
 | GNOME desktop | `ubuntu-desktop-minimal` + `open-vm-tools-desktop`; boots to `graphical.target`, GDM3 auto-login as `admin`, Xorg session (software-rendered — no GPU accel in a Fusion arm64 guest) |
-| apt toolchain | build-essential (gcc/g++/make), cmake, autoconf, git, curl, wget, jq, ripgrep, vim, tmux, socat, python3 + pip/venv, ruby; browser + X libs for Firefox |
+| apt toolchain | build-essential (gcc/g++/make), cmake, ninja-build, autoconf, git + git-lfs, curl, wget, jq, ripgrep, vim, tmux, socat, libicu-dev, python3.12 + pip/venv, ruby + rbenv; browser + X libs for Firefox |
 | Go | `go<version>` tarball from go.dev/dl, hash-pinned; `/usr/local/go` |
 | Rust | Via rustup (arm64 host toolchain), `rust`/`cargo` on PATH |
-| Node.js | Via nvm (major from the vars file, default alias); npm globals in the nvm dir |
+| Java | OpenJDK `<version>` from the archive; `JAVA_HOME` via `/etc/profile.d` (opt-in, empty = skip) |
+| Gradle | Hash-pinned bin zip (`gradle-<version>-bin.zip`) in `/opt/gradle`; wrapper distribution pre-cached (opt-in, empty = skip) |
+| Kotlin/Native | Not cached — JetBrains publishes no linux-aarch64 prebuilt (macOS x86_64/aarch64 and Linux x86_64 only); `kotlin_native_version` left empty |
+| Android SDK | Bootstrapped into `/opt/android-sdk` (hash-pinned cmdline-tools); platform-tools/platforms/build-tools/NDK via `android_sdk_packages` (opt-in, empty = skip) |
+| Node.js | Via nvm (major from the vars file, default alias); npm globals in the nvm dir, incl. `pnpm` and `yarn` |
 | GitHub CLI | `gh_<version>_linux_arm64.deb`, hash-pinned |
 | Visual Studio Code | `code_<version>_arm64.deb`, hash-pinned; `code` on PATH |
 | Firefox | Official linux-aarch64 release tarball, hash-pinned; `/opt/firefox` (no Chrome: CfT publishes no linux-arm64 build, Ubuntu's chromium is snap-only) |
@@ -108,7 +112,9 @@ build no files and have no such directory.
 | OpenCode (`opencode-ai`) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
 | OpenChamber web UI | npm global (`@openchamber/web`), systemd **user** service (`agent-dev-env-openchamber`) on `0.0.0.0:4000`, started at boot (`loginctl enable-linger`) |
+| OpenChamber desktop app | linux-arm64 AppImage from the GitHub releases, hash-pinned; `/opt/openchamber/OpenChamber.AppImage` + GNOME desktop entry + `openchamber-desktop` on PATH |
 | SSH | openssh-server with password auth; `admin`/sandbox1 (see the vars file); Ubuntu's default cloud-init finalization |
+| Image identity | `~/.config/agent-dev-env/image.json` (image name + `image_version`, baked at build time) |
 | systemd user services | Linger enabled for `admin`; the guest agent's bridge services and OpenChamber auto-start in the guest |
 
 ## Versioning
@@ -156,9 +162,13 @@ tag via `npx agent-dev-env tag <image>`.
   typing was unreliable and could boot the interactive Subiquity installer
   — a build then hangs waiting for SSH; check the VNC watchdog frames in
   `~/Library/Application Support/agent-dev-env/build/ubuntu-vmware/packer_cache/watchdog/`).
-  The watchdog polls every 3 s until the command is typed (grub's menu
-  countdown is ~20 s wide — the slow ~2 min-per-frame poll could miss it
-  entirely), then relaxes to the slow cadence.
+  The watchdog types the command blind, OCR-free: once the VNC server is
+  up it presses `c` (grub shell) and types the command every 6 s over a
+  bounded grid (grub's menu countdown is only ~20-30 s wide, and Fusion's
+  VNC server drops the console at boot, so the slow ~2 min-per-frame OCR
+  poll can miss it entirely); the OCR path resumes as the late/shell
+  rescue only after the grid exhausts — the two typers never run
+  concurrently (interleaved typing garbles the grub shell).
 - **Keep `autoinstall/user-data` in sync with the vars file**: the seed
   bakes the sandbox user (name + crypt hash of `ssh_password`). Change
   the credentials in the vars file *and* the `identity:` block together.

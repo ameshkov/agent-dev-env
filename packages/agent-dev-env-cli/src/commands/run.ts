@@ -24,13 +24,13 @@ export async function runCmd(platform: Platform, flags: RunFlags): Promise<numbe
   const context = buildContext(options);
   const title =
     platform === 'macos'
-      ? `macOS sandbox: ${context.vm} (image: ${context.image}, ` +
+      ? `macOS sandbox: ${context.instance} (image: ${context.image}, ` +
         `${options.headless ? 'headless' : 'gui'} mode)`
       : platform === 'windows-vmware'
-        ? `Windows VMware sandbox: ${context.vm} (image: ${context.image})`
+        ? `Windows VMware sandbox: ${context.instance} (image: ${context.image})`
         : platform === 'windows-qemu'
-          ? `Windows QEMU sandbox: ${context.vm} (image: ${context.image})`
-          : `Ubuntu VMware sandbox: ${context.vm} (image: ${context.image})`;
+          ? `Windows QEMU sandbox: ${context.instance} (image: ${context.image})`
+          : `Ubuntu VMware sandbox: ${context.instance} (image: ${context.image})`;
   logger.title(title);
   const backend =
     platform === 'macos'
@@ -55,7 +55,7 @@ export function buildContext(options: ReturnType<typeof resolveRunOptions>): Run
   return {
     platform: options.platform,
     options,
-    vm: options.vm,
+    instance: options.instance,
     image: options.image,
     workDir: options.workDir,
     mountName: options.mountName,

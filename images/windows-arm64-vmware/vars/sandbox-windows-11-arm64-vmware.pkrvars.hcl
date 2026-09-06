@@ -23,14 +23,27 @@ iso_sha256 = "638AA2C88E94385B00F4F178D071E3DF0B7D9E335577A83BD533B7F2EB65ADF0"
 vmware_fusion_app_path = "/Applications/VMware Fusion.app"
 
 # Toolchain versions installed via Chocolatey (choco package versions —
-# must exist in the community repository).
+# must exist in the community repository) — except Node.js: the official
+# win-arm64 zip from nodejs.org (choco's nodejs is the x64 build).
 nodejs_version = "26.8.1"
+# SHA256 of node-v26.8.1-win-arm64.zip (nodejs.org/dist/v26.8.1/SHASUMS256.txt).
+nodejs_sha256 = "09d62005aa9dca8fcd9bdce8196f5aa783eee3818d5af74089eb7297103c02d4"
 python_version = "3.13.15"
+# SHA256 of python-3.13.15-arm64.exe (python.org/ftp/python/3.13.15/).
+python_sha256 = "c252c676087c49e6b94e95a273536b78921c28a5fc9f86d15d25392328247249"
 github_cli_version = "2.97.0"
+# SHA256 of gh_2.97.0_windows_arm64.zip (cli/cli release v2.97.0).
+github_cli_sha256 = "3e2d4a166da4ee5020c592737b65eec0e724946d5d5b962f5fe59d99116dc4bf"
 ripgrep_version = "15.2.0"
 git_version = "2.55.0.4"
+# SHA256 of Git-2.55.0.4-arm64.exe (git-for-windows release v2.55.0.windows.4).
+git_sha256 = "8d358f4d53a5a475570edca3124dc0d4f1a020321594984f58e6b04f86f50ec4"
 jq_version = "1.8.1"
 open_code_review_version = "1.9.5"
+# Firefox: official win64-aarch64 installer (mozilla.org versioned product
+# URL; the win64-x64 choco package is not native).
+firefox_version = "155.0.1"
+firefox_sha256 = "920a8ef590280b5c5e82cff413bcb1780ef2d887aa9f54218e735ae0f8cf3a92"
 
 # C/C++ + cross-language toolchains (brought over from AdGuard's
 # build-agent-images windows2022-vs2022 / windows2022-go images).
@@ -38,6 +51,8 @@ open_code_review_version = "1.9.5"
 # SDKs + VC++ workload + Win11 SDK) and Rust (via rustup, not choco) are
 # installed by dedicated provisioners.
 go_version = "1.27.0"
+# SHA256 of go1.27.0.windows-arm64.zip (go.dev/dl).
+go_sha256 = "6e0156b9788209931dd340fadc04171ce15063c17b51c92e7b86b51109626e90"
 rust_version = "1.95"
 wixtoolset_version = "3.14.1.20250415"
 protoc_version = "36.0.0"
@@ -49,15 +64,14 @@ mingw_version = "16.1.0"
 make_version = "4.4.1"
 vs_buildtools_version = "117.14.37"
 
-# Google Chrome: installed from the Chrome for Testing (CfT) snapshot
-# archive instead of choco — choco's googlechrome package always downloads
-# the live dl.google.com MSI whose hash rotates on every Chrome release,
-# so the pinned package hash breaks between releases. CfT serves versioned
-# zips at storage.googleapis.com/chrome-for-testing-public/<version>/,
-# which stay downloadable and hash-stable. The x64 build runs under Windows
-# on ARM emulation, like the choco MSI did.
-chrome_version = "152.0.7977.54"
-chrome_sha256 = "91850065e6b80bba0c752e17a150fe1b9e39bba51ed705640c1273f565950dda"
+# Google Chrome: installed from the official Windows ARM64 enterprise MSI
+# (dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi).
+# Chrome for Testing ships no win-arm64 builds (linux64/mac-arm64/mac-x64/
+# win32/win64 only), so the native ARM64 option is Google's live enterprise
+# channel — the MSI rotates with every Chrome release, so chrome_sha256
+# must be refreshed alongside it (the choco googlechrome package was
+# abandoned for the same reason).
+chrome_sha256 = "f5a577728328223688b214283baee80bac8011a5877d4159ed4a7a70c1dec1c9"
 
 # VM resources
 disk_size = 100
@@ -70,6 +84,21 @@ memory_gb = 8
 winrm_username = "Administrator"
 winrm_password = "sandbox1"
 
+# Tooling brought over from AdGuard's windows2022-vs2022 / windows2022-flutter
+# images: Ninja (choco; Git LFS is bundled with Git for Windows), Temurin
+# JDK 21 (JAVA_HOME + jni.h/jvm.lib, a JDK not a JRE) and Conan via pip. The
+# JDK is the official Adoptium win-aarch64 zip (choco's temurin21 is x64).
+jdk_version = "21.0.12.1"
+# SHA256 of OpenJDK21U-jdk_aarch64_windows_hotspot_21.0.12.1_1.zip
+# (adoptium/jdk-21.0.12.1+1 release; Adoptium asset checksum).
+jdk_sha256 = "ccf2e51f527d542a70ba5794a600d3aac04b4e967950e227834c7566cb1bec7b"
+ninja_version = "1.13.2"
+
+# OpenChamber desktop app (win-arm64 NSIS installer from the GitHub
+# releases, hash-pinned) — parity with the mac cask and the Ubuntu AppImage.
+openchamber_desktop_version = "1.22.0"
+openchamber_desktop_sha256 = "6c49e9a6fdd6a2b6f4e4618f3eb83ab46b4b0e667b04668ac1ac9890622941f3"
+
 # OpenChamber web UI password + port. The runner advertises the UI at
 # http://<guest-ip>:4000 (password "sandbox" by default). OpenChamber
 # refuses to serve on the network without a password.
@@ -80,4 +109,4 @@ openchamber_port = 4000
 # besides :latest). For every release: bump it, add a CHANGELOG.md entry,
 # and create the windows-arm64-vmware-v<version> git tag
 # (npx agent-dev-env tag <image>).
-image_version = "1.0.0"
+image_version = "1.1.0"

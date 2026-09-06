@@ -12,6 +12,7 @@ import { logger } from '../lib/logger.js';
 import { findHostAlias } from '../lib/network.js';
 import { openSshSession } from '../lib/ssh.js';
 import { findHostAgentSocket, findHostDockerSocket, startHostBridge } from './bridges.js';
+import { bridgeConflictMessage } from './bridges.js';
 import type { RunContext, RunState } from './framework.js';
 import {
   ensureGuestAgent,
@@ -27,12 +28,16 @@ import {
  *  NAT-segment x.y.z.1 / itself), resolved once and reused.
  */
 export async function windowsBridges(context: RunContext, state: RunState): Promise<void> {
-  const ip = state.vmIp;
+  const isQemu = context.platform === 'windows-qemu';
+  // The QEMU backend reaches the guest through the hostfwd loopback (the
+  // guest's NAT IP is not host-visible), so its bridge wiring needs no
+  // VMware guest-IP discovery — without the fallback the shared step
+  // (which branches on state.vmIp) skipped the whole setup after boot.
+  const ip = isQemu ? '127.0.0.1' : state.vmIp;
   if (!ip) {
     logger.warn('no guest IP — skipping the host bridges and guest setup.');
     return;
   }
-  const isQemu = context.platform === 'windows-qemu';
   const guestAlias = isQemu ? QEMU_HOST_ALIAS : await findHostAlias(ip);
   if (!guestAlias) {
     logger.warn('could not determine the host NAT-segment address — skipping the bridges.');
@@ -127,7 +132,7 @@ async function setupDockerBridge(
 
 /** The shared bridge start: the host spawn + state bookkeeping (the
  *  shell's start_host_bridge; pidfile + detached bridge.js via
- *  runners/bridges.ts — no socat). Returns false when skipped.
+ *  runners/bridges.ts — no socat). Returns false when skipped/conflicted.
  */
 async function startBridge(
   context: RunContext,
@@ -136,12 +141,17 @@ async function startBridge(
   socket: string,
   bindHost: string,
 ): Promise<boolean> {
+  const port = role === 'ssh-agent' ? context.agentPort : context.dockerPort;
   const result = await startHostBridge({
     role,
     bindHost,
-    port: role === 'ssh-agent' ? context.agentPort : context.dockerPort,
+    port,
     forwardSocket: socket,
+    instance: context.instance,
   });
+  if (result.state === 'conflict') {
+    logger.die(bridgeConflictMessage(role, context.instance, port));
+  }
   if (result.state === 'failed') {
     logger.warn(`skipping the ${role === 'ssh-agent' ? 'SSH agent' : 'Docker'} bridge.`);
     return false;

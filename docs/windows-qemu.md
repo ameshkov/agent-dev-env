@@ -67,10 +67,10 @@ the disk image: the local build output
 when present, otherwise it asks to pull
 `sandbox-windows-11-arm64-qemu:latest` from GHCR via
 [oras](https://oras.land/) (one-time, ~14 GB — `brew install oras`).
-It then creates a working VM — a copy-on-write overlay plus persistent TPM
-and EFI state under
-`~/Library/Application Support/agent-dev-env/windows-qemu/<image>/` — the
-pristine image is never written to. The guest boots headless or in a QEMU
+It then creates a working VM per instance — a copy-on-write overlay plus
+persistent TPM and EFI state under
+`~/Library/Application Support/agent-dev-env/windows-qemu/<image>/working/<instance>/` —
+the pristine image is never written to. The guest boots headless or in a QEMU
 window (default), and SSH/RDP/OpenChamber ports are forwarded to the host:
 
 | Port | Guest service |
@@ -176,22 +176,44 @@ openchamber restart
   npx agent-dev-env run windows-qemu --reset
   ```
 
-- **Delete the sandbox** — remove the state from the host (the working disk
-  overlay, the TPM and EFI NVRAM, and the pulled image cache) and free the
-  disk space:
+- **Delete the sandbox** — remove the instance's state (the working disk
+  overlay, the TPM and EFI NVRAM; the shared pristine qcow2 cache goes
+  with the last instance) and free the disk space:
 
   ```bash
   npx agent-dev-env delete windows-qemu --yes
   ```
 
-  This stops qemu + swtpm first, then removes the platform's state dir
-  under `~/Library/Application Support/agent-dev-env/windows-qemu/`. The
-  next run re-pulls the image and starts fresh. Without `--yes` it asks
+  This stops qemu + swtpm first, then removes the instance's state dir
+  under `~/Library/Application Support/agent-dev-env/windows-qemu/<image>/working/<instance>/`.
+  The next run re-clones the instance. Other instances keep the shared
+  pristine image. Without `--yes` it asks
   before deleting.
 
-- **Run several sandboxes side by side** — set `AGENT_DEV_ENV_DATA_HOME` to
-  a different root and `SANDBOX_SSH_PORT` / `SANDBOX_RDP_PORT` /
-  `SANDBOX_OPENCHAMBER_PORT` to free ports.
+- **Run several sandboxes side by side** — set a distinct `SANDBOX_VM`
+  per sandbox (instances share the pristine image) and free ports:
+  `SANDBOX_SSH_PORT` / `SANDBOX_RDP_PORT` / `SANDBOX_OPENCHAMBER_PORT` /
+  `SANDBOX_AGENT_PORT` / `SANDBOX_DOCKER_PORT`.
+
+> [!TIP]
+> Once a sandbox is configured the way you like it (installed tools,
+> provider login, VS Code extensions — everything the working overlay
+> accumulated), promote it to a *golden image* of your own instead of
+> carrying that setup over by hand:
+>
+> ```bash
+> npx agent-dev-env stop windows-qemu
+> OVERLAY="$HOME/Library/Application Support/agent-dev-env/windows-qemu/sandbox-windows-11-arm64-qemu/working/default-agent-dev-env/sandbox-windows-11-arm64-qemu.qcow2"
+> qemu-img convert -O qcow2 "$OVERLAY" "$HOME/sandbox-windows-golden.qcow2"
+> WINDOWS_IMAGE="$HOME/sandbox-windows-golden.qcow2" \
+>   npx agent-dev-env run windows-qemu --reset
+> ```
+>
+> The converted disk is standalone (no backing image), so it works as the
+> pristine image; the CLI still creates a fresh COW overlay, TPM state and
+> EFI NVRAM per instance. Pass `--reset` (or accept the "backing image
+> changed" prompt) so the new working VM is created from the golden disk
+> instead of the old one.
 
 ---
 
@@ -209,10 +231,19 @@ and runs under `qemu-system-aarch64` with HVF. It ships:
 | Windows 11 Pro (ARM64) | Unactivated (watermark); generic Pro key used for Setup |
 | VirtIO drivers | viostor/vioscsi, NetKVM, vioserial, balloon + qemu guest agent |
 | Chocolatey | Community package manager (versions pinned in the vars file) |
-| Node.js, Python, Git, gh, ripgrep, jq, curl | Choco packages (versions from the vars file) |
-| Go, Vim, NuGet, make, MinGW-w64 | Choco packages (versions from the vars file) |
+| Node.js | Official win-arm64 zip from nodejs.org (version + SHA256 in the vars file) — native ARM64, no x64 emulation |
+| Google Chrome | Official Windows ARM64 enterprise MSI (SHA256 in the vars file; the URL is Google's live channel — refresh the hash on Chrome releases) |
+| Firefox | Official win64-aarch64 installer (version + SHA256 in the vars file) — native ARM64 |
+| Python, Git, gh | Official win-arm64 builds (version + SHA256 in the vars file) — native ARM64 |
+| ripgrep, jq, curl | Choco packages (no win-arm64 builds; run emulated) |
+| Ninja, Git LFS | Ninja choco package (version from the vars file); Git LFS is bundled with Git for Windows, filters wired |
+| pnpm, yarn | npm globals alongside the Node toolchain |
+| Go | Official win-arm64 toolchain (`go<version>.windows-arm64.zip`, SHA256-pinned) — `go build` produces arm64 output |
+| Vim, NuGet, make, MinGW-w64 | Choco packages (no win-arm64 builds; run emulated) |
 | Rust | Via rustup (arm64 host toolchain + MSVC targets), `rust`/`cargo` on PATH |
-| VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), CMake, Windows 11 SDK |
+| JDK (Temurin) | Official Adoptium win-aarch64 zip machine `JAVA_HOME` + `bin` on PATH, verified `jni.h`/`jvm.lib` (JDK, not a JRE) |
+| Conan | C/C++ dependency manager, current release via pip |
+| VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), ATL, CMake, Windows 11 SDK |
 | WiX, protoc, NASM, LLVM | Choco packages (versions from the vars file) |
 | Visual Studio Code | Native arm64 build, latest stable, direct download; `code` on PATH |
 | Google Chrome | Chrome for Testing snapshot (hash-pinned), x64 under emulation |
@@ -220,7 +251,10 @@ and runs under `qemu-system-aarch64` with HVF. It ships:
 | OpenCode (`opencode-ai`) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
 | OpenChamber web UI | npm global (`@openchamber/web`), scheduled task on `0.0.0.0:4000` |
+| OpenChamber desktop app | win-arm64 NSIS installer, hash-pinned; Start Menu shortcut |
+| Long paths + Developer Mode | Registry (`LongPathsEnabled`, `AllowDevelopmentWithoutDevLicense`) + `git config --system core.longpaths` |
 | OpenSSH Server + RDP | Enabled; Administrator/sandbox1 (see the vars file) |
+| Image identity | `%USERPROFILE%\.config\agent-dev-env\image.json` (image name + `image_version`, baked at build time) |
 | Docker CLI | Client only (`docker` + `docker compose`), remote engine via the host bridge |
 | Bridge tooling | Node.js (in-image) relays for the SSH-agent/Docker bridges (the host side is the CLI's own forwarder — no socat) |
 
@@ -229,13 +263,18 @@ password `sandbox1`):
 
 ```powershell
 node --version && npm --version
+pnpm --version && yarn --version
 python --version
 git --version
+git lfs version
 gh --version
 rg --version
 jq --version
 go version
 rustc --version && cargo --version
+java -version
+conan --version
+ninja --version
 protoc --version
 code --version
 opencode --version
@@ -247,8 +286,8 @@ docker compose version
 
 ### What's synced from the host
 
-The Windows guests run the same bridges as the other sandboxes, but the
-user settings copy and the shared work directory are macOS/Ubuntu-only:
+The Windows guests run the same bridges as the other sandboxes, plus the
+user settings copy (the shared host directory stays macOS/Ubuntu-only):
 
 - **SSH agent bridge** — a password-manager SSH agent (Bitwarden,
   1Password, ...) is bridged into the guest; `ssh`/`git` inside the
@@ -257,13 +296,82 @@ user settings copy and the shared work directory are macOS/Ubuntu-only:
 - **Docker engine bridge** — the host's Docker engine is bridged into the
   guest, so the image's Docker CLI works as-is (see
   [Docker (remote engine)](#docker-remote-engine)).
+- **User settings copy** — your host's opencode config and credentials,
+  OpenCodeReview config, Copilot config, VS Code settings/extensions,
+  `~/.ssh` helpers and `.gitconfig` are copied into the guest on first run
+  (and again when the settings change), so the agent works with your
+  config and credentials out of the box — see
+  [User settings on the guest](#user-settings-on-the-guest).
 
-Not synced: there is **no user settings copy** on Windows — opencode
-config and credentials, Copilot, VS Code extensions and `.gitconfig` stay
-on the host; configure the agent inside the guest (see
-[Configure the environment](#configure-the-environment)). There is also
-**no shared host directory** — the virtio-fs driver has no ARM64 Windows
-build (see [No shared folder](#no-shared-folder)).
+Not synced: there is **no shared host directory** — the virtio-fs driver
+has no ARM64 Windows build (see [No shared folder](#no-shared-folder)).
+
+### User settings on the guest
+
+On first run — and again whenever the settings change — `run` offers to
+copy your host's user settings into the guest, so the agent works with your
+credentials and preferences out of the box. What it copies (most files
+keep their path under `%USERPROFILE%`; the two macOS-only locations are
+mapped to the Windows layout):
+
+| Source (host) | Destination (guest) | Why |
+| --- | --- | --- |
+| `~/.config/opencode/opencode.json` (or `.jsonc`) | same path | OpenCode configuration (models, providers, permissions, MCP servers, npm plugins, agents/commands defined in JSON, ...) |
+| `~/.config/opencode/tui.json` (or `.jsonc`) | same path | TUI preferences (theme, keybinds, notifications, ...) |
+| `~/.config/opencode/agents/` through `themes/`, `package.json` (+ lockfiles) | same path | Your custom OpenCode agents, commands, modes, plugins, skills, tools, themes and local-plugin deps |
+| `~/.local/share/opencode/auth.json` | same path | OpenCode provider credentials — no `opencode auth login` needed in the guest (opencode keeps `~/.local/share/opencode` on Windows too) |
+| `~/.opencodereview/config.json` | same path | OpenCodeReview provider/model config — `ocr` works in the guest as configured on the host |
+| `~/.copilot/config.json` and `~/.copilot/skills/` | same path | Copilot CLI settings and your Copilot skills |
+| `~/.vscode/extensions/` | same path | Installed VS Code extensions — no reinstall in the guest |
+| `~/Library/Application Support/Code/User/settings.json` | `%APPDATA%\Code\User\settings.json` | VS Code settings, including per-extension settings (`github.copilot.*`, ...) |
+| `~/Library/Application Support/Code/User/keybindings.json` | `%APPDATA%\Code\User\keybindings.json` | Custom keyboard shortcuts |
+| `~/Library/Application Support/Code/User/snippets/` | `%APPDATA%\Code\User\snippets\` | User code snippets |
+| `~/Library/Application Support/mcp-compress-router/` | `%APPDATA%\mcp-compress-router\` | mcp-compress-router settings: the MCP server config (`mcp.json`) with its endpoints and credentials — on Windows the router reads it from `%APPDATA%`, not `~/.config` |
+| `~/.ssh/allowed_signers`, `~/.ssh/known_hosts`, `~/.ssh/*.sh` | same path | SSH signing verification, trusted host keys and SSH helper scripts |
+| `~/.gitconfig` | same path | Git identity, aliases, signing config (paths rewritten to `%USERPROFILE%`) |
+
+The copy also carries the host's `OPENCODE_MODELS_URL` when it is set:
+opencode resolves model IDs against a model registry (fetched from
+`${OPENCODE_MODELS_URL}/api.json`, the models.dev format) — a custom
+registry is what makes a private provider's models (e.g. `tokenguard/*`)
+resolve in the guest. The copy sets it for the user and appends it to
+OpenChamber's `startup.env`.
+
+The step runs **once per VM**: after copying, a versioned marker file
+inside the guest (`%USERPROFILE%\.config\agent-dev-env\settings-copied`)
+records the settings version that was copied, and later runs skip the
+step. When new settings are added (and the settings version is bumped),
+the step runs again and copies the additional files. Each time it runs it
+asks for confirmation and lists what it will copy. To re-copy at any time,
+use `sync` below (it copies regardless of the marker); to make `run` offer
+the copy again, delete the marker in the guest first and re-run:
+
+```bash
+ssh -p 2222 Administrator@127.0.0.1
+del "%USERPROFILE%\.config\agent-dev-env\settings-copied"
+```
+
+To re-sync the settings **without** restarting the VM — e.g. after editing
+`%USERPROFILE%\.config\opencode\opencode.json`, adding a skill or command,
+or updating your Git identity — run `sync`:
+
+```powershell
+agent-dev-env sync windows-qemu
+```
+
+It copies exactly the same files as `run` (both share the same code), asks
+for confirmation unless you pass `--yes`, and restarts OpenChamber (the
+`dev.openchamber.web` scheduled task) so the new settings take effect. The
+VM must be running — start it with `agent-dev-env run windows-qemu` first
+if it isn't. A sync also updates the guest's version marker, so `run`
+won't re-offer the copy on its next run.
+
+Notes:
+
+- Only files that exist on the host are copied.
+- `.gitconfig` is adjusted for the guest: host home paths are rewritten
+  to `%USERPROFILE%` (forward slashes). Private SSH keys stay on the host
+  — the SSH agent bridge provides them inside the guest.
 
 ### OpenChamber from the host
 
@@ -288,6 +396,14 @@ The default UI password is `sandbox`. Notes:
   only forwards the host ports — nothing is exposed to your LAN.
 - `openchamber status` and `openchamber logs` (from the guest) help when
   something is off.
+- The "up" line in the run summary is a **boot-time probe**: the server
+  can later stop answering (the TCP listener may stay up while HTTP never
+  responds — `openchamber status` then reports "no running instance"
+  while the port still accepts). If the UI hangs, restart the server:
+  `agent-dev-env sync windows-qemu` re-copies the user settings and
+  restarts OpenChamber through its `dev.openchamber.web` task, or from
+  the guest (RDP/SSH): `schtasks /End /TN dev.openchamber.web` then
+  `schtasks /Run /TN dev.openchamber.web`.
 
 ### Docker (remote engine)
 
@@ -357,9 +473,31 @@ Notes:
 
 ### No shared folder
 
-The virtio-fs driver has no ARM64 Windows build (virtio-win issue #1337), so
-there is no host-directory mount like the macOS image's shared `dev`
-volume. Your code stays on the host; get it into the sandbox with:
+There is no host-directory mount like the macOS image's shared `dev`
+volume: the QEMU stack cannot deliver one on this host/guest pair. Two
+independent gaps close both sides of the only real mechanism (virtio-fs):
+
+- **Guest side — no ARM64 virtio-fs driver.** QEMU's native shared-folder
+  device is virtio-fs, and Windows needs the `viofs` driver from
+  `virtio-win` to mount it. That driver is built only for x86/x86_64 —
+  there is no ARM64 build for Windows 11 ARM64 guests (virtio-win issue
+  #1337). The ARM64 driver set this image stages (viostor / vioscsi /
+  NetKVM) covers storage and networking only, not filesystems.
+- **Host side — `virtiofsd` is Linux-only.** The virtio-fs device is served
+  by `virtiofsd`, a FUSE-based userspace daemon with no macOS build; even
+  with an ARM64 driver a mount could not be served from an Apple Silicon
+  host.
+
+The other QEMU sharing options don't fit either: the legacy 9p device has
+no Windows driver at all, and QEMU's `smb=` user-mode helper needs an
+`smbd` running on the host and is Linux-oriented. So this sandbox keeps the
+host-directory-is-remote model: your code stays on the host and travels by
+network transport instead. The macOS and VMware sandboxes *do* have
+workspace mounts, but only because their hypervisors provide the pieces —
+Apple's Virtualization.framework on macOS and HGFS under Fusion, both with
+matching in-guest drivers for those native guests.
+
+Your code stays on the host; get it into the sandbox with:
 
 - **git** — clone/push from inside the guest (the bridged SSH agent covers
   authentication).

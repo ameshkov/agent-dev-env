@@ -136,7 +136,7 @@ async function requireVirtioWinIso(image: CatalogImage, cacheDir: string): Promi
       if (!url) {
         throw new Error(`virtio_win_url is empty in ${image.varsFile}`);
       }
-      await runChecked('curl', ['-fSL', '-o', cachedPath, url]);
+      await runChecked('curl', ['-fSL', '-o', cachedPath, url], { stream: true });
     }
     await verifyIsoSha256(
       cachedPath,

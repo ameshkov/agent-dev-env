@@ -7,7 +7,7 @@
 
 import { rmSync } from 'node:fs';
 import { logger } from '../lib/logger.js';
-import { imageRootDir } from '../lib/paths.js';
+import { instanceDir } from '../lib/paths.js';
 import { openSshSession, waitForSshd } from '../lib/ssh.js';
 import { startVm } from '../lib/vmrun.js';
 import { ensureUserSettings, restartOpenchamber } from '../settings/ubuntu-copy.js';
@@ -47,9 +47,9 @@ async function preflight(context: RunContext): Promise<void> {
   requireVmrun();
   ensureBridgeDir();
   if (context.options.reset) {
-    const root = imageRootDir(PLATFORM, context.image);
+    const root = instanceDir(PLATFORM, context.image, context.instance);
     logger.info(
-      `Resetting the working VM (--reset) — deleting the extracted base and the working clone.`,
+      `Resetting the working VM (--reset) — deleting the working instance '${context.instance}'.`,
     );
     rmSync(root, { recursive: true, force: true });
   }
@@ -58,7 +58,7 @@ async function preflight(context: RunContext): Promise<void> {
 // --- step 2: boot -----------------------------------------------------------
 
 async function boot(context: RunContext, state: RunState): Promise<void> {
-  const workVmx = ubuntuWorkingVmx(context.image);
+  const workVmx = ubuntuWorkingVmx(context.image, context.instance);
   await stopRunningVm(context, workVmx, PLATFORM);
   logger.cmd(`vmrun -T fusion start ${workVmx} ${context.options.headless ? 'nogui' : 'gui'}`);
   const start = await startVm(workVmx, context.options.headless ? 'nogui' : 'gui');
@@ -132,7 +132,7 @@ async function finish(context: RunContext, state: RunState): Promise<void> {
   if (!context.options.foreground) {
     return;
   }
-  await waitForForegroundVmStop(ubuntuWorkingVmx(context.image));
+  await waitForForegroundVmStop(ubuntuWorkingVmx(context.image, context.instance));
   // The VM stopped (or Cmd+C was pressed) — kill the bridges this run
   // started; in background mode they stay up, outliving the CLI by design.
   await cleanupRunBridge(state.bridges.agent.pid, 'agent bridge');

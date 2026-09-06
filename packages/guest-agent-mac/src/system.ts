@@ -136,9 +136,12 @@ export function dockerContextArgs(docker: string, sock: string): string[][] {
   ];
 }
 
-/** Appends a marker-guarded block when the marker is not present yet. */
+/** Appends a marker-guarded block when the marker is not present yet. The
+ *  existing content is preserved; only the separator newline, if needed,
+ *  plus the block are added.
+ */
 export function appendBlockIfMissing(content: string, block: string, marker: string): string {
-  return content.includes(marker) ? content : `${maybeNewline(content)}${block}`;
+  return content.includes(marker) ? content : `${content}${maybeNewline(content)}${block}`;
 }
 
 /** Removes a marker-guarded block: the leading blank separator, the

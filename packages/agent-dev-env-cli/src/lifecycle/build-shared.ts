@@ -230,7 +230,7 @@ export function announceBuild(image: CatalogImage, context: BuildContext): void 
  */
 export async function runPackerInit(templateFile: string): Promise<void> {
   logger.step('packer init');
-  await runChecked('packer', ['init', templateFile]);
+  await runChecked('packer', ['init', templateFile], { stream: true });
 }
 
 /** `packer fmt -check` — warns (does not fail) when formatting differs.
@@ -273,7 +273,11 @@ export async function runPackerBuild(options: PackerBuildOptions): Promise<void>
     args.push('-var', `build_dir=${options.buildDir}`);
   }
   args.push('-var-file', options.varsFile, options.templateFile);
-  await runChecked('packer', args, { cwd: options.platformDir, env: options.env });
+  await runChecked('packer', args, {
+    cwd: options.platformDir,
+    env: options.env,
+    stream: true,
+  });
 }
 
 /** The human size of a path (`du -sh`).
