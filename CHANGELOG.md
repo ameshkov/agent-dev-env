@@ -13,6 +13,8 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-06
+
 ### Fixed
 
 - `run macos` no longer fails with `the specified VM "<image>" does not
@@ -68,5 +70,6 @@ never removed — changes land there until the next release.
   repo with `-C` stay on the target repo even when the CLI itself runs
   inside a git hook.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.1.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.1.1...HEAD
+[0.1.1]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.1.1
 [0.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.1.0
