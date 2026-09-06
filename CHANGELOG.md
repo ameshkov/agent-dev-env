@@ -13,6 +13,8 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-06
+
 ### Added
 
 - The `agent-dev-env` CLI — the first release of the command-line tool
@@ -47,3 +49,6 @@ never removed — changes land there until the next release.
   (`GIT_DIR`, `GIT_INDEX_FILE`, ...), so `git` calls that select their
   repo with `-C` stay on the target repo even when the CLI itself runs
   inside a git hook.
+
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.1.0...HEAD
+[0.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.1.0

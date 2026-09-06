@@ -13,6 +13,8 @@ the next release.
 
 ## [Unreleased]
 
+## [windows-arm64-vmware-v1.1.0] - 2026-09-06
+
 ### Added
 
 - Toolchain parity with the AdGuard build-agent-images Windows recipes:
@@ -137,5 +139,6 @@ the next release.
   macOS-flavored and not installed into Windows guests yet; the shared
   folder is best-effort (HGFS must be enabled by VMware Tools).
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/windows-arm64-vmware-v1.0.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/windows-arm64-vmware-v1.1.0...HEAD
+[windows-arm64-vmware-v1.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-vmware-v1.1.0
 [windows-arm64-vmware-v1.0.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-vmware-v1.0.0

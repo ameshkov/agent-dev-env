@@ -12,6 +12,8 @@ is never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [mac-v1.8.0] - 2026-09-06
+
 ### Added
 
 - Dev toolchain parity with the AdGuard build-agent-images mac recipe:
@@ -252,7 +254,8 @@ Xcode 26.4.1).
 - Visual Studio Code (latest stable) with the `code` CLI on PATH.
 - OpenCode (AI coding agent) via the anomalyco Homebrew tap.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/mac-v1.6.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/mac-v1.8.0...HEAD
+[mac-v1.8.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.8.0
 [mac-v1.6.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.6.0
 [mac-v1.5.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.5.0
 [mac-v1.4.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.4.0

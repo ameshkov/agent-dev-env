@@ -13,6 +13,8 @@ the next release.
 
 ## [Unreleased]
 
+## [ubuntu-arm64-vmware-v1.2.0] - 2026-09-06
+
 ### Added
 
 - Dev tooling: `ninja-build`, `git-lfs` (filters wired for root and the
@@ -204,6 +206,7 @@ the next release.
   `DEVELOPMENT.md` and `AGENTS.md` list the new platform and the
   shared `scripts/lib/vmware.sh` helper.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/ubuntu-arm64-vmware-v1.1.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/ubuntu-arm64-vmware-v1.2.0...HEAD
+[ubuntu-arm64-vmware-v1.2.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/ubuntu-arm64-vmware-v1.2.0
 [ubuntu-arm64-vmware-v1.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/ubuntu-arm64-vmware-v1.1.0
 [ubuntu-arm64-vmware-v1.0.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/ubuntu-arm64-vmware-v1.0.0
