@@ -13,6 +13,14 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows image builds no longer fail on a stale Chrome hash: the
+  recipes stopped pinning the Google Chrome enterprise MSI, whose URL is
+  a live, unversioned ARM64 channel (Chrome for Testing ships no
+  win-arm64 build). The images install whatever build the channel
+  serves, like the macOS recipe (Homebrew cask).
+
 ## [0.1.1] - 2026-09-06
 
 ### Fixed

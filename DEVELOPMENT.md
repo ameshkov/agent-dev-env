@@ -387,8 +387,9 @@ is not in the repo) with `autounattend.xml` answering Setup. The builder:
 3. **Provisions over WinRM** (`Administrator`/password from the vars
    file, elevated token): virtio guest tools (full driver suite + qemu
    guest agent), Chocolatey + toolchain (Node.js, Python, Git, GitHub
-   CLI, ripgrep, jq, curl, Chrome, Firefox, Docker CLI — versions pinned
-   in the vars file), Visual Studio Code (native arm64, direct download),
+   CLI, ripgrep, jq, curl, Firefox, Docker CLI — versions pinned in the
+   vars file; Chrome comes from Google's live ARM64 enterprise channel),
+   Visual Studio Code (native arm64, direct download),
     OpenCode (`opencode-ai`), OpenCodeReview (`ocr`), the OpenChamber web
     UI as a native service on port 4000 (with the `OPENCODE_BINARY` pin,
     like the macOS template), OpenSSH Server + RDP, and the bridge
@@ -516,7 +517,6 @@ the foreground (with hard errors for missing prerequisites).
 | `firefox_version` / `firefox_sha256` | string | pinned | Firefox version + SHA256 of `Firefox Setup <version>.exe` (win64-aarch64) |
 | `go_version` / `go_sha256` | string | pinned | Go version + SHA256 of `go<version>.windows-arm64.zip` |
 | `jdk_version` / `jdk_sha256` | string | pinned | JDK version + SHA256 of the Adoptium win-aarch64 zip (choco's `temurin21` is x64) |
-| `chrome_sha256` | string | pinned | SHA256 of the official Windows ARM64 Chrome MSI — the URL is Google's live enterprise channel, refresh the hash on every Chrome release (Chrome for Testing ships no win-arm64 builds) |
 | `ripgrep_version` / `jq_version` | string | pinned | Choco package versions (no win-arm64 builds exist; they run emulated) |
 | `open_code_review_version` | string | pinned | `ocr` version installed via npm |
 | `disk_size` | number | `100` | VM disk size in GB |

@@ -246,7 +246,7 @@ and runs under `qemu-system-aarch64` with HVF. It ships:
 | VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), ATL, CMake, Windows 11 SDK |
 | WiX, protoc, NASM, LLVM | Choco packages (versions from the vars file) |
 | Visual Studio Code | Native arm64 build, latest stable, direct download; `code` on PATH |
-| Google Chrome | Chrome for Testing snapshot (hash-pinned), x64 under emulation |
+| Google Chrome | Official Windows ARM64 enterprise MSI (live channel — no version or hash pin); native arm64 |
 | Firefox | Choco package (x64, runs under emulation) |
 | OpenCode (`opencode-ai`) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |

@@ -63,15 +63,6 @@ mingw_version = "16.1.0"
 make_version = "4.4.1"
 vs_buildtools_version = "117.14.37"
 
-# Google Chrome: installed from the official Windows ARM64 enterprise MSI
-# (dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi).
-# Chrome for Testing ships no win-arm64 builds (linux64/mac-arm64/mac-x64/
-# win32/win64 only), so the native ARM64 option is Google's live enterprise
-# channel — the MSI rotates with every Chrome release, so chrome_sha256
-# must be refreshed alongside it (the choco googlechrome package was
-# abandoned for the same reason).
-chrome_sha256 = "f5a577728328223688b214283baee80bac8011a5877d4159ed4a7a70c1dec1c9"
-
 # VM resources
 disk_size = 100
 cpu_count = 4

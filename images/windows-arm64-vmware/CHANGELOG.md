@@ -13,6 +13,15 @@ the next release.
 
 ## [Unreleased]
 
+### Fixed
+
+- The image no longer pins a SHA256 for the Google Chrome enterprise
+  MSI: the URL is Google's live, unversioned ARM64 channel (Chrome for
+  Testing publishes no win-arm64 build), so the pinned hash went stale
+  with every Chrome release and failed the build at the Chrome install
+  step. Chrome installs whatever build the channel serves, like the
+  macOS recipe (Homebrew cask).
+
 ## [windows-arm64-vmware-v1.1.0] - 2026-09-06
 
 ### Added

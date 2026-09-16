@@ -122,11 +122,6 @@ variable "open_code_review_version" {
   description = "open-code-review (ocr) version installed via npm."
 }
 
-variable "chrome_sha256" {
-  type        = string
-  description = "SHA256 of the official Windows ARM64 Chrome MSI (googlechromestandaloneenterprise_arm64.msi). The MSI URL is Google's live enterprise channel — refresh the hash on every Chrome release (CfT ships no win-arm64 builds)."
-}
-
 # --- C/C++ + cross-language toolchains (brought over from AdGuard's
 # build-agent-images windows2022-vs2022 image) ---
 
@@ -511,8 +506,10 @@ build {
         throw "choco install $installArgs failed after 3 attempts"
       }
       # Official ARM64 downloads over the VM's NAT can drop mid-transfer;
-      # retry, then verify the SHA256 against the pinned *_sha256 vars.
-      function Download-Verified([string]$url, [string]$destFile, [string]$expected) {
+      # retry, then verify the SHA256 when the caller pinned one (an empty
+      # _sha256 means "no pin": the Chrome MSI lives on a live channel
+      # with no versioned URL).
+      function Download-Verified([string]$url, [string]$destFile, [string]$expected = '') {
         $downloaded = $false
         for ($try = 1; $try -le 3 -and -not $downloaded; $try++) {
           try {
@@ -524,6 +521,10 @@ build {
           }
         }
         if (-not $downloaded) { throw "download failed after 3 attempts: $url" }
+        if (-not $expected) {
+          Write-Host "no pinned SHA256 for $url - skipping checksum"
+          return
+        }
         $actual = (Get-FileHash -Path $destFile -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne $expected) {
           throw "checksum mismatch for $url`n  expected $expected`n  got      $actual"
@@ -642,14 +643,15 @@ build {
       # ===== Google Chrome (official Windows ARM64 MSI) =====
       # Chrome for Testing publishes no win-arm64 builds (its platform
       # list is linux64/mac-arm64/mac-x64/win32/win64), so the native
-      # option is the enterprise ARM64 MSI. The URL is Google's live
-      # enterprise channel: the binary rotates with every Chrome release,
-      # so chrome_sha256 must be refreshed alongside it (the choco
-      # googlechrome package was abandoned for the same reason; CfT is
-      # used wherever a versioned arm64 archive exists).
+      # option is the enterprise ARM64 MSI. That URL is a live channel
+      # with no versioned variant: the MSI rotates with every Chrome
+      # release, so nothing can be pinned without vendoring it — install
+      # whatever build the channel serves (the choco googlechrome package
+      # was abandoned for the same reason; CfT is used wherever a
+      # versioned arm64 archive exists).
       $chromeAppDir = 'C:\Program Files\Google\Chrome\Application'
       $chromeExe = Join-Path $chromeAppDir 'chrome.exe'
-      Download-Verified "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi" "$env:TEMP\chrome-arm64.msi" '${var.chrome_sha256}'
+      Download-Verified "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise_arm64.msi" "$env:TEMP\chrome-arm64.msi"
       $install = Start-Process msiexec -ArgumentList '/i', "$env:TEMP\chrome-arm64.msi", '/qn', '/norestart' -Wait -PassThru
       if ($install.ExitCode -notin 0, 3010) { throw "chrome MSI install failed: exit code $($install.ExitCode)" }
       Remove-TempFile "$env:TEMP\chrome-arm64.msi"
@@ -755,7 +757,7 @@ build {
       if (-not (Test-Path $choco)) { throw "choco.exe not found at $choco (Chocolatey install failed?)" }
       # JDK — official Adoptium win-aarch64 zip, hash-pinned (choco's
       # temurin21 is x64; on this ARM64 guest the JVM would run emulated).
-      function Download-Verified([string]$url, [string]$destFile, [string]$expected) {
+      function Download-Verified([string]$url, [string]$destFile, [string]$expected = '') {
         $downloaded = $false
         for ($try = 1; $try -le 3 -and -not $downloaded; $try++) {
           try {
@@ -767,6 +769,10 @@ build {
           }
         }
         if (-not $downloaded) { throw "download failed after 3 attempts: $url" }
+        if (-not $expected) {
+          Write-Host "no pinned SHA256 for $url - skipping checksum"
+          return
+        }
         $actual = (Get-FileHash -Path $destFile -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne $expected) {
           throw "checksum mismatch for $url`n  expected $expected`n  got      $actual"

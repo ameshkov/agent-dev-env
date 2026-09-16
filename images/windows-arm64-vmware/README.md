@@ -110,7 +110,7 @@ The macOS/tart images build no files and have no such directory.
 | VS2022 Build Tools | Choco + `setup.exe` finalizer: .NET 4.8/.NET Core SDKs, VC++ workload (x86/x64/ARM/ARM64), ATL, CMake, Windows 11 SDK |
 | WiX, protoc, NASM, LLVM | Choco packages (versions from the vars file) |
 | Visual Studio Code | Native arm64 build, latest stable, direct download; `code` on PATH |
-| Google Chrome | Chrome for Testing snapshot, hash-pinned (see the vars file); x64, runs under Prism emulation |
+| Google Chrome | Official Windows ARM64 enterprise MSI (live channel — no version or hash pin); native arm64 |
 | Firefox | Choco package (x64, runs under Prism emulation) |
 | OpenCode (`opencode-ai`) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
