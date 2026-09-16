@@ -18,6 +18,7 @@ import { syncUserSettings as syncUbuntuSettings } from '../settings/ubuntu-copy.
 import { syncUserSettings as syncWindowsSettings } from '../settings/windows-copy.js';
 import { resolveGuestCredentials as resolveUbuntuCredentials } from '../runners/ubuntu-guest.js';
 import { resolveGuestCredentials as resolveWindowsCredentials } from '../runners/windows-guest.js';
+import { offerGuestReboot } from '../runners/windows-reboot.js';
 import { resolveRunOptions } from '../runners/options.js';
 
 export interface SyncOptions {
@@ -138,7 +139,10 @@ async function syncWindowsVmware(options: SyncOptions): Promise<void> {
 
   const ip = await waitGuestIp(vmx);
   const creds = resolveWindowsCredentials(runOptions.image, runOptions.env, ip);
-  await syncOverSsh(creds, runOptions, vmx);
+  await syncOverSsh(creds, runOptions, vmx, async () => {
+    const freshIp = await waitGuestIp(vmx);
+    return resolveWindowsCredentials(runOptions.image, runOptions.env, freshIp);
+  });
 }
 
 /** The Windows QEMU sync flow (qemu must be running — the settings travel
@@ -161,20 +165,25 @@ async function syncWindowsQemu(options: SyncOptions): Promise<void> {
     '127.0.0.1',
     runOptions.sshPort,
   );
-  await syncOverSsh(creds, runOptions, instance);
+  await syncOverSsh(creds, runOptions, instance, async () => creds);
 }
 
 /** The shared ssh2 sync flow: copy always (no marker gate) + restart
- *  OpenChamber, then close the session.
+ *  OpenChamber; when the copy wrote a user-scope environment variable
+ *  (OPENCODE_MODELS_URL), offer the reboot Windows needs for running
+ *  processes, then close the session.
  *
  * @param creds - The guest credentials.
  * @param runOptions - The resolved run options (home, yes).
  * @param target - The display name of the VM being synced into.
+ * @param refresh - Resolves the credentials to wait on after a reboot
+ *   (the VMware NAT IP can change; the QEMU target is fixed).
  */
 async function syncOverSsh(
   creds: SshCredentials,
   runOptions: ReturnType<typeof resolveRunOptions>,
   target: string,
+  refresh: () => Promise<SshCredentials>,
 ): Promise<void> {
   const session = await openSshSession(creds);
   try {
@@ -184,7 +193,10 @@ async function syncOverSsh(
       runOptions.yes === true,
       creds.username,
     );
-    if (outcome === 'copied') {
+    if (outcome.state === 'copied') {
+      if (outcome.envApplied) {
+        await offerGuestReboot(session, runOptions.yes === true, creds, refresh);
+      }
       logger.ok(`Done — settings synced into '${target}'.`);
     }
   } finally {

@@ -84,14 +84,15 @@ agent-dev-env/
 │   │   │   │                   #   (ubuntu*.ts: image/shared/bridges/guest/
 │   │   │   │                   #   rules/summary), the Windows VMware
 │   │   │   │                   #   backend (windows*.ts: image/guest/bridges/
-│   │   │   │                   #   autologon/shared/summary, via the shared
-│   │   │   │                   #   vmware-image.ts (clone/upgrade) +
+│   │   │   │                   #   autologon/reboot/shared/summary, via the
+│   │   │   │                   #   shared vmware-image.ts (clone/upgrade) +
 │   │   │   │                   #   vmware-image-archive.ts (archive pick/base)/
 │   │   │   │                   #   vmware-common.ts) and the
 │   │   │   │                   #   Windows QEMU backend (windows-qemu.ts +
 │   │   │   │                   #   qemu-image.ts + windows-qemu-summary.ts via
 │   │   │   │                   #   the shared windows-bridges/windows-guest/
-│   │   │   │                   #   windows-autologon + lib/qemu.ts)
+│   │   │   │                   #   windows-autologon/windows-reboot +
+│   │   │   │                   #   lib/qemu.ts)
 │   │   │   ├── settings/       #   user-settings copy: shared builders
 │   │   │   │                   #   (common.ts) + per-transport IO — macos.ts/
 │   │   │   │                   #   macos-copy.ts (tart), ubuntu.ts/
@@ -595,6 +596,36 @@ operational incidents.
   mangles non-ASCII — an em-dash once closed a string literal early and
   failed the whole build). Enforced by a unit test; em-dashes are fine in
   comments and in non-PowerShell files.
+- **Windows templates: capturing native output**: capturing a native
+  guest command's output is unreliable in these templates — ShimGen shims
+  hand the child the console handles (nothing reaches a pipeline, so a
+  version guard can pass on an empty string), and `2>$null` / `2>&1` on a
+  native command drops the result under Windows PowerShell 5.1, file
+  redirection included. Verify state from the filesystem (e.g. a package
+  manager's own metadata) instead of parsing a command's output, and
+  fail loudly on an empty value.
+- **Windows guest binaries**: prefer the native ARM64 build (hash-pinned
+  official download); x64 under Prism emulation is the fallback for
+  tools whose ARM64 build is broken. opencode is the standing tradeoff:
+  the images keep its native win-arm64 npm build because the server path
+  (what OpenChamber runs) is the stable one, even though its TUI cannot
+  start on ARM64 (Bun's windows-aarch64 runtime disables `bun:ffi`). The
+  win-x64 fallback (the Chocolatey package and the x64-baseline zip) was
+  tried and reverted — it crashed intermittently at startup with
+  `0xC0000005` under Prism, which broke OpenChamber's managed
+  `opencode serve`.
+- **Windows env vars need a fresh process**: Windows applies a user-scope
+  environment variable only to processes started after it was written, so
+  a settings copy that wrote one (`OPENCODE_MODELS_URL`) offers the guest
+  reboot it needs instead of trusting the restarted OpenChamber task to
+  pick it up (`runners/windows-reboot.ts`, used by both Windows backends'
+  `run` and `sync`).
+- **Guest reboots are observed down then up**: after a reboot request the
+  runner waits until the guest stops answering sshd on the pre-reboot
+  target before it waits for it to come back — the pre-shutdown sshd
+  answers probes for a few seconds, so a plain "wait for sshd" returns
+  before the reboot even started and the next step lands in the shutdown
+  window (`runners/windows-reboot.ts`).
 - **Guest markers**: guest-side state markers live under
   `~/.config/agent-dev-env/` (green-field policy; no legacy paths).
 - **Image provenance**: every image must answer "which image is this

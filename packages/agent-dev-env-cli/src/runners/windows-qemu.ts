@@ -26,7 +26,7 @@ import {
   stopSwtpm,
   swtpmSockPath,
 } from '../lib/qemu.js';
-import { openSshSession, probeSshd, waitForSshd, type SshCredentials } from '../lib/ssh.js';
+import { openSshSession, probeSshd, type SshCredentials } from '../lib/ssh.js';
 import { ensureUserSettings, restartOpenchamber } from '../settings/windows-copy.js';
 import type { RunContext, RunState, SandboxBackend } from './framework.js';
 import { ensureBridgeDir } from './bridges.js';
@@ -37,6 +37,7 @@ import { windowsBridges } from './windows-bridges.js';
 import { configureAutologon } from './windows-autologon.js';
 import { resolveGuestCredentials } from './windows-guest.js';
 import { printQemuSummary } from './windows-qemu-summary.js';
+import { offerGuestReboot, waitForGuestReboot } from './windows-reboot.js';
 
 const PLATFORM = 'windows-qemu' as const;
 
@@ -141,23 +142,16 @@ async function waitForQemuBoot(creds: SshCredentials, qemuPid: number): Promise<
   logger.die(`timed out waiting for the VM to boot (no SSH on 127.0.0.1:${creds.port}).`);
 }
 
-/** The QEMU auto-logon: configure, then wait for sshd on the same
- *  hostfwd target (the guest IP never changes — unlike the VMware flow,
- *  no guest-IP refresh is needed).
+/** The QEMU auto-logon: configure, then wait through the shared
+ *  down-then-up reboot wait on the fixed hostfwd target — unlike the
+ *  VMware flow, no guest-IP refresh is needed.
  */
 async function ensureQemuAutologon(context: RunContext, creds: SshCredentials): Promise<void> {
   if (!(await configureAutologon(context, creds))) {
     return;
   }
   logger.info('Rebooting the guest (a minute or two)...');
-  process.stdout.write('    Waiting for the guest to reboot (up to 10 min)');
-  if (await waitForSshd(creds)) {
-    process.stdout.write(` ${logger.color('green')}done${logger.reset()}\n`);
-    logger.ok('Guest rebooted with auto-logon enabled.');
-  } else {
-    process.stdout.write(` ${logger.color('yellow')}failed${logger.reset()}\n`);
-    logger.die(`timed out waiting for the guest to reboot (no SSH on 127.0.0.1:${creds.port}).`);
-  }
+  await waitForGuestReboot(creds, async () => creds, 'Guest rebooted with auto-logon enabled.');
 }
 
 // --- step 4/5 hooks ---------------------------------------------------------
@@ -176,14 +170,18 @@ async function setupSettings(context: RunContext, state: RunState): Promise<void
   );
   const session = await openSshSession(creds);
   try {
-    state.settings = await ensureUserSettings(
+    const outcome = await ensureUserSettings(
       session,
       context.options.home,
       context.options.yes,
       creds.username,
     );
-    if (state.settings === 'copied') {
+    state.settings = outcome.state;
+    if (outcome.state === 'copied') {
       await restartOpenchamber(session);
+      if (outcome.envApplied) {
+        await offerGuestReboot(session, context.options.yes, creds, async () => creds);
+      }
     }
   } catch (err) {
     state.settings = 'failed';

@@ -6,7 +6,9 @@
 // is psExec + SFTP over ssh2, the Windows backends' guest channel, which
 // never reports remote exit codes, so every step ends on an stdout
 // marker). The marker-gated `ensure` flow and the on-demand `sync` flow
-// mirror settings/ubuntu-copy.ts — only the transport differs.
+// mirror settings/ubuntu-copy.ts — only the transport differs, plus the
+// Windows-only OPENCODE_MODELS_URL write, whose reboot the callers offer
+// (runners/windows-reboot.ts).
 
 import {
   cpSync,
@@ -37,6 +39,18 @@ import {
   SETTINGS_VERSION,
   type SettingsState,
 } from './windows.js';
+
+/** The Windows settings-copy outcome: the shared state plus whether the
+ *  copy wrote a user-scope environment variable. Windows hands such a
+ *  variable only to processes started afterwards, so the callers offer a
+ *  guest reboot when this is true. */
+export interface WindowsSettingsOutcome {
+  /** The shared settings-copy state (see SettingsState). */
+  state: SettingsState;
+  /** The copy wrote a user-scope environment variable (only a reboot
+   *  makes it visible to already-running processes). */
+  envApplied: boolean;
+}
 
 /** The archive's guest path (SFTP style, forward slashes — the same
  *  location the apply script extracts from, `%TEMP%` of the user).
@@ -125,18 +139,22 @@ function stripAppleDouble(dir: string): void {
  *  registry, not the copied settings.
  *
  * @param session - The connected guest session.
+ * @returns True when the variable was written (the caller then offers the
+ *   reboot Windows needs for already-running processes).
  */
-async function applyModelsUrlEnv(session: SshSession): Promise<void> {
+async function applyModelsUrlEnv(session: SshSession): Promise<boolean> {
   const modelsUrl = process.env.OPENCODE_MODELS_URL ?? '';
   if (!modelsUrl) {
-    return;
+    return false;
   }
   const env = await psExec(session, openCodeModelsUrlScript(modelsUrl), 30_000);
   if (!env.stdout.includes('env-ok')) {
     logger.warn(
       'could not set OPENCODE_MODELS_URL in the guest — opencode keeps the public model registry.',
     );
+    return false;
   }
+  return true;
 }
 
 /** Copies the settings into the guest: staged tree → tar.gz → SFTP →
@@ -147,6 +165,8 @@ async function applyModelsUrlEnv(session: SshSession): Promise<void> {
  * @param files - The settings paths (relative to the host home).
  * @param home - The host home directory.
  * @param username - The guest user.
+ * @returns True when a user-scope environment variable was written (the
+ *   caller offers the reboot it needs to reach running processes).
  * @throws Error when the pack, upload, apply or marker write fails.
  */
 async function copySettingsToGuest(
@@ -154,7 +174,7 @@ async function copySettingsToGuest(
   files: string[],
   home: string,
   username: string,
-): Promise<void> {
+): Promise<boolean> {
   const staging = mkdtempSync(join(tmpdir(), 'agent-dev-env-settings.'));
   try {
     const tree = join(staging, 'tree');
@@ -195,7 +215,7 @@ async function copySettingsToGuest(
           'they will be offered again on the next run.',
       );
     }
-    await applyModelsUrlEnv(session);
+    return applyModelsUrlEnv(session);
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
@@ -244,17 +264,18 @@ async function confirmSettingsCopy(home: string, files: string[], yes: boolean):
  * @param home - The host home directory.
  * @param yes - Skip confirmations.
  * @param username - The guest user (defaults to the image account).
- * @returns The step outcome (see SettingsState).
+ * @returns The step outcome (state + whether a user-scope environment
+ *   variable was written — a reboot is then offered).
  */
 export async function ensureUserSettings(
   session: SshSession,
   home: string = homedir(),
   yes = false,
   username = 'Administrator',
-): Promise<SettingsState> {
+): Promise<WindowsSettingsOutcome> {
   if (await guestSettingsUpToDate(session)) {
     logger.ok(`User settings are already in the guest (version ${SETTINGS_VERSION}) — skipping.`);
-    return 'uptodate';
+    return { state: 'uptodate', envApplied: false };
   }
   const files = collectSettingsFiles(home);
   if (files.length === 0) {
@@ -263,15 +284,15 @@ export async function ensureUserSettings(
         'OpenCodeReview config, Copilot config, VS Code config and extensions, ' +
         '~/.ssh, ~/.gitconfig) — nothing to copy.',
     );
-    return 'none';
+    return { state: 'none', envApplied: false };
   }
   if (!(await confirmSettingsCopy(home, files, yes))) {
     logger.info('Skipped — re-run `agent-dev-env run` to copy them later.');
-    return 'declined';
+    return { state: 'declined', envApplied: false };
   }
-  await copySettingsToGuest(session, files, home, username);
+  const envApplied = await copySettingsToGuest(session, files, home, username);
   logger.ok(`Copied ${files.length} item(s) into the guest.`);
-  return 'copied';
+  return { state: 'copied', envApplied };
 }
 
 /** The `sync` flow: always copies (no marker gate) + restarts OpenChamber.
@@ -280,14 +301,15 @@ export async function ensureUserSettings(
  * @param home - The host home directory.
  * @param yes - Skip confirmations.
  * @param username - The guest user (defaults to the image account).
- * @returns The outcome (copied | none | declined | failed).
+ * @returns The outcome (state + whether a user-scope environment variable
+ *   was written — a reboot is then offered).
  */
 export async function syncUserSettings(
   session: SshSession,
   home: string = homedir(),
   yes = false,
   username = 'Administrator',
-): Promise<SettingsState> {
+): Promise<WindowsSettingsOutcome> {
   const files = collectSettingsFiles(home);
   if (files.length === 0) {
     logger.info(
@@ -295,14 +317,14 @@ export async function syncUserSettings(
         'OpenCodeReview config, Copilot config, VS Code config and extensions, ' +
         '~/.ssh, ~/.gitconfig) — nothing to copy.',
     );
-    return 'none';
+    return { state: 'none', envApplied: false };
   }
   if (!(await confirmSettingsCopy(home, files, yes))) {
     logger.info('Skipped — re-run `agent-dev-env sync` to copy them later.');
-    return 'declined';
+    return { state: 'declined', envApplied: false };
   }
-  await copySettingsToGuest(session, files, home, username);
+  const envApplied = await copySettingsToGuest(session, files, home, username);
   logger.ok(`Copied ${files.length} item(s) into the guest (version ${SETTINGS_VERSION}).`);
   await restartOpenchamber(session);
-  return 'copied';
+  return { state: 'copied', envApplied };
 }

@@ -8,15 +8,16 @@
 // snippets are ASCII-only (the packed-agents rule) and ride the ssh2
 // PowerShell transport (windows-guest.ts). The check/enable core
 // (configureAutologon) is shared by the VMware + QEMU backends — only
-// the reboot wait differs (the VMware NAT IP can change; the QEMU
-// hostfwd target is fixed).
+// the shared reboot wait's target refresh differs (the VMware NAT IP can
+// change; the QEMU hostfwd target is fixed).
 
 import { logger } from '../lib/logger.js';
 import { confirmDefault } from '../lib/prompt.js';
-import { openSshSession, waitForSshd, type SshCredentials } from '../lib/ssh.js';
+import { openSshSession, type SshCredentials } from '../lib/ssh.js';
 import type { RunContext, RunState } from './framework.js';
 import { waitGuestIp } from './vmware-common.js';
 import { psExec } from './windows-guest.js';
+import { waitForGuestReboot } from './windows-reboot.js';
 
 const WINLOGON_KEY = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon';
 
@@ -103,10 +104,11 @@ export async function configureAutologon(
 }
 
 /** The VMware auto-logon flow: configure, then wait for the rebooted
- *  guest (the auto-logon makes the OpenChamber ONLOGON task fire at
- *  boot). The reboot can land on a new NAT address, so the sshd wait
- *  targets the refreshed IP (the shell's wait_guest_ip re-set the
- *  global).
+ *  guest via the shared down-then-up wait (the auto-logon makes the
+ *  OpenChamber ONLOGON task fire at boot). The reboot can land on a new
+ *  NAT address, so the target is refreshed through waitGuestIp — after
+ *  the guest is actually down (vmrun keeps reporting the old IP until
+ *  then).
  *
  * @param context - The run context (yes flag).
  * @param state - The accumulated run state (vmIp refreshed after reboot).
@@ -123,15 +125,13 @@ export async function ensureAutologon(
     return;
   }
   logger.info('Rebooting the guest (a minute or two)...');
-  const ip = await waitGuestIp(workVmx);
-  state.vmIp = ip;
-  const rebooted = { ...creds, host: ip };
-  process.stdout.write('    Waiting for the guest to reboot (up to 10 min)');
-  if (await waitForSshd(rebooted)) {
-    process.stdout.write(` ${logger.color('green')}done${logger.reset()}\n`);
-    logger.ok('Guest rebooted with auto-logon enabled.');
-  } else {
-    process.stdout.write(` ${logger.color('yellow')}failed${logger.reset()}\n`);
-    logger.die(`timed out waiting for the guest to reboot (no SSH on ${ip}:22).`);
-  }
+  const rebooted = await waitForGuestReboot(
+    creds,
+    async () => {
+      const ip = await waitGuestIp(workVmx);
+      return { ...creds, host: ip };
+    },
+    'Guest rebooted with auto-logon enabled.',
+  );
+  state.vmIp = rebooted.host;
 }

@@ -211,6 +211,14 @@ restarts OpenChamber so the new settings take effect, and updates the
 guest's settings marker so the runner won't re-offer the copy on its next
 run. `--yes` skips the confirmation prompt.
 
+On the Windows platforms the copy also writes the host's
+`OPENCODE_MODELS_URL` into the guest when it is set. Windows applies a
+user environment variable only to processes started afterwards, so the
+sync then offers to reboot the guest (default: yes) — the reboot makes
+sure OpenChamber and opencode pick it up. Declining leaves the guest
+running; reboot it before relying on the variable. With `--yes` the
+reboot offer is accepted without asking.
+
 ## status
 
 Live status of one or all platforms: the image, whether the pristine /

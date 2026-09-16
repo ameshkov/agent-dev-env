@@ -20,6 +20,7 @@ import { ensureAutologon } from './windows-autologon.js';
 import { windowsBridges } from './windows-bridges.js';
 import { resolveGuestCredentials } from './windows-guest.js';
 import { ensureWindowsImage, windowsWorkingVmx } from './windows-image.js';
+import { offerGuestReboot } from './windows-reboot.js';
 import { setupWindowsSharedFolder } from './windows-shared.js';
 import { printWindowsSummary } from './windows-summary.js';
 import {
@@ -101,14 +102,25 @@ async function setupSettings(context: RunContext, state: RunState): Promise<void
   const creds = resolveGuestCredentials(context.image, context.options.env, state.vmIp);
   const session = await openSshSession(creds);
   try {
-    state.settings = await ensureUserSettings(
+    const outcome = await ensureUserSettings(
       session,
       context.options.home,
       context.options.yes,
       creds.username,
     );
-    if (state.settings === 'copied') {
+    state.settings = outcome.state;
+    if (outcome.state === 'copied') {
       await restartOpenchamber(session);
+      if (outcome.envApplied) {
+        const workVmx = windowsWorkingVmx(context.image, context.instance);
+        const rebooted = await offerGuestReboot(session, context.options.yes, creds, async () => {
+          const ip = await waitGuestIp(workVmx);
+          return resolveGuestCredentials(context.image, context.options.env, ip);
+        });
+        if (rebooted) {
+          state.vmIp = rebooted.host;
+        }
+      }
     }
   } catch (err) {
     state.settings = 'failed';

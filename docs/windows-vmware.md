@@ -352,7 +352,10 @@ opencode resolves model IDs against a model registry (fetched from
 `${OPENCODE_MODELS_URL}/api.json`, the models.dev format) — a custom
 registry is what makes a private provider's models (e.g. `tokenguard/*`)
 resolve in the guest. The copy sets it for the user and appends it to
-OpenChamber's `startup.env`.
+OpenChamber's `startup.env`. Windows applies a user environment variable
+only to processes started afterwards, so the copy then offers a guest
+reboot (default: yes) — the reboot makes sure OpenChamber and opencode
+see the variable. `--yes` accepts the offer without a prompt.
 
 The step runs **once per VM**: after copying, a versioned marker file
 inside the guest (`%USERPROFILE%\.config\agent-dev-env\settings-copied`)
@@ -368,7 +371,7 @@ ssh Administrator@<guest-ip>
 del "%USERPROFILE%\.config\agent-dev-env\settings-copied"
 ```
 
-To re-sync the settings **without** restarting the VM — e.g. after editing
+To re-sync the settings on the running VM — e.g. after editing
 `%USERPROFILE%\.config\opencode\opencode.json`, adding a skill or command,
 or updating your Git identity — run `sync`:
 
@@ -378,10 +381,13 @@ agent-dev-env sync windows-vmware
 
 It copies exactly the same files as `run` (both share the same code), asks
 for confirmation unless you pass `--yes`, and restarts OpenChamber (the
-`dev.openchamber.web` scheduled task) so the new settings take effect. The
-VM must be running — start it with `agent-dev-env run windows-vmware` first
-if it isn't. A sync also updates the guest's version marker, so `run`
-won't re-offer the copy on its next run.
+`dev.openchamber.web` scheduled task) so the new settings take effect.
+When it also wrote the host's `OPENCODE_MODELS_URL`, it offers the guest
+reboot the new environment variable needs (default: yes; `--yes` accepts
+it) — see [User settings on the guest](#user-settings-on-the-guest). The
+VM must be running — start it with `agent-dev-env run windows-vmware`
+first if it isn't. A sync also updates the guest's version marker, so
+`run` won't re-offer the copy on its next run.
 
 Notes:
 

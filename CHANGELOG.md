@@ -13,8 +13,29 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- The Windows settings copy (`run` and `sync` on `windows-qemu` /
+  `windows-vmware`) now offers a guest reboot after it wrote a user-scope
+  environment variable (`OPENCODE_MODELS_URL`). Windows applies such a
+  variable only to processes started afterwards, so without the reboot
+  OpenChamber and opencode can keep the old environment. The offer
+  defaults to yes; `--yes` accepts it without a prompt.
+
 ### Fixed
 
+- The Windows guest-reboot waits no longer return against the
+  still-running pre-reboot guest. A reboot request (`shutdown /r /t 0`)
+  leaves the old sshd answering for a few seconds, so the "wait for the
+  guest to reboot" poll succeeded immediately and the run proceeded into
+  the actual shutdown window — after the auto-logon reboot `run
+  windows-vmware` then died at step 3 with ssh2's `Not connected`, and a
+  guest that came back on a new NAT IP was polled at its old address. The
+  runner now waits for the guest to stop answering first (two consecutive
+  failed probes), then refreshes the target (the VMware IP via `vmrun
+  getGuestIPAddress`, unchanged for QEMU), then waits for sshd to come
+  back (`runners/windows-reboot.ts`, shared by both backends' auto-logon
+  and settings reboots and by `sync`).
 - Windows image builds no longer fail on a stale Chrome hash: the
   recipes stopped pinning the Google Chrome enterprise MSI, whose URL is
   a live, unversioned ARM64 channel (Chrome for Testing ships no
