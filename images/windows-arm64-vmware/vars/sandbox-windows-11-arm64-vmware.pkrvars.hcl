@@ -100,4 +100,4 @@ openchamber_port = 4000
 # besides :latest). For every release: bump it, add a CHANGELOG.md entry,
 # and create the windows-arm64-vmware-v<version> git tag
 # (npx agent-dev-env tag <image>).
-image_version = "1.1.0"
+image_version = "1.1.1"
