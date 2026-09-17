@@ -13,6 +13,8 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-17
+
 ### Changed
 
 - The image-size estimates shown in pull prompts, the macOS
@@ -171,7 +173,8 @@ never removed — changes land there until the next release.
   repo with `-C` stay on the target repo even when the CLI itself runs
   inside a git hook.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.3.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.3.1...HEAD
+[0.3.1]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.3.1
 [0.3.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.3.0
 [0.2.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.2.0
 [0.1.1]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.1.1
