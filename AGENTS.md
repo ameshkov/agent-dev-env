@@ -647,6 +647,15 @@ operational incidents.
   reboot it needs instead of trusting the restarted OpenChamber task to
   pick it up (`runners/windows-reboot.ts`, used by both Windows backends'
   `run` and `sync`).
+- **The models registry URL reaches each service the platform's way**:
+  the settings copy carries the host's `OPENCODE_MODELS_URL` on all three
+  guest platforms. Windows writes a user-scope variable plus OpenChamber's
+  `startup.env` and offers a reboot; Ubuntu writes
+  `~/.config/agent-dev-env/models-url.env` (sourced by `.profile`/
+  `.bashrc`), an OpenChamber systemd user drop-in (`EnvironmentFile=`) and
+  reloads the user manager — a service restart suffices, no reboot; macOS
+  writes the same env file and sources it from `.zprofile`/`.zshrc`, and
+  the OpenChamber restart's LaunchAgent re-snapshot picks the export up.
 - **Guest reboots are observed down then up**: after a reboot request the
   runner waits until the guest stops answering sshd on the pre-reboot
   target before it waits for it to come back — the pre-shutdown sshd

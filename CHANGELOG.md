@@ -13,6 +13,22 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- The Ubuntu and macOS settings copies (`run` and `sync` on
+  `ubuntu-vmware` / `macos`) now carry the host's `OPENCODE_MODELS_URL`
+  into the guest, like the Windows copy does: the value lands in
+  `~/.config/agent-dev-env/models-url.env` and the login shells source
+  it. Ubuntu points the OpenChamber systemd user service at the file
+  through a drop-in (`EnvironmentFile=`) and reloads the user manager;
+  macOS sources it from `~/.zprofile`/`~/.zshrc`, so the OpenChamber
+  restart's LaunchAgent re-snapshot picks it up. Neither needs a guest
+  reboot. A custom registry is what makes private provider models (e.g.
+  `tokenguard/*`) resolve in the guest. The Ubuntu settings version is
+  bumped to 4 and the macOS one to 10, so existing sandboxes are offered
+  the copy again on their next `run` — or use `sync`, which always
+  applies it.
+
 ## [0.3.1] - 2026-09-17
 
 ### Changed

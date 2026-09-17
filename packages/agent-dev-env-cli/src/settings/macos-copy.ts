@@ -2,7 +2,9 @@
 // tar streams over `tart exec -i` (binary-safe pipe — tar may contain
 // arbitrary content, so the text-oriented run() helpers cannot carry
 // it), the marker check/write, the OpenChamber restart, and the two
-// flows: `ensure` (run step, marker-gated) and `sync` (on demand).
+// flows: `ensure` (run step, marker-gated) and `sync` (on demand), plus
+// the OPENCODE_MODELS_URL write (the green-field env file sourced from
+// ~/.zprofile/~/.zshrc, built by openCodeModelsUrlScript).
 
 import { spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -17,6 +19,7 @@ import {
   guestSettingsMarkerScript,
   guestUnpackCommand,
   GUEST_HOME,
+  openCodeModelsUrlScript,
   openchamberRestartScript,
   sanitizeGitconfig,
   SETTINGS_VERSION,
@@ -95,6 +98,38 @@ export async function guestSettingsUpToDate(vm: string): Promise<boolean> {
   return res.code === 0;
 }
 
+/** Sets OPENCODE_MODELS_URL in the guest when the host uses a custom
+ *  opencode model registry — without it the guest loads the public
+ *  models.dev registry and private provider models (e.g. tokenguard)
+ *  resolve to "not found". Writes the green-field env file and sources it
+ *  from ~/.zprofile/~/.zshrc; the caller's OpenChamber restart sources
+ *  ~/.zprofile before re-creating the LaunchAgent, so the export lands in
+ *  the service environment. Non-fatal: a failure only degrades the
+ *  registry, not the copied settings.
+ *
+ * @param vm - The running VM name.
+ * @returns True when the variable was written.
+ */
+async function applyModelsUrlEnv(vm: string): Promise<boolean> {
+  const modelsUrl = process.env.OPENCODE_MODELS_URL ?? '';
+  if (!modelsUrl) {
+    return false;
+  }
+  if (/[\r\n']/.test(modelsUrl)) {
+    logger.warn('OPENCODE_MODELS_URL contains a quote or newline — not setting it in the guest.');
+    return false;
+  }
+  const res = await execVm(vm, ['sh', '-s'], { input: openCodeModelsUrlScript(modelsUrl) });
+  if (res.code !== 0 || !res.stdout.includes('env-ok')) {
+    logger.warn(
+      'could not set OPENCODE_MODELS_URL in the guest — opencode keeps the public model registry.',
+    );
+    return false;
+  }
+  logger.ok('Set OPENCODE_MODELS_URL for OpenChamber and the login shells.');
+  return true;
+}
+
 /** Copies the settings into the guest: archive 1 = everything except
  *  .gitconfig, archive 2 = the sanitized .gitconfig, then the version
  *  marker (the legacy two-archive dance — bsdtar stops at the first
@@ -127,6 +162,7 @@ async function copySettingsToGuest(vm: string, files: string[], home: string): P
           'they will be offered again on the next run.',
       );
     }
+    await applyModelsUrlEnv(vm);
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }

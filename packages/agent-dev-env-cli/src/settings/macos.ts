@@ -19,8 +19,11 @@ export {
 
 /** Version of the settings copy. Bump when the file set or the copy logic
  *  changes: guests whose marker is older are offered the copy again.
+ *  Version 10 adds the OPENCODE_MODELS_URL write (see
+ *  openCodeModelsUrlScript) — existing guests get the copy offered again
+ *  so the variable reaches sandboxes copied by an older CLI.
  */
-export const SETTINGS_VERSION = 9;
+export const SETTINGS_VERSION = 10;
 
 /** The sandbox user in the macOS base image — fixed, so host home paths
  *  are rewritten to it when the settings are copied (see sanitize).
@@ -68,6 +71,35 @@ export function openchamberRestartScript(port: number): string {
     'fi',
     'openchamber startup disable 2>/dev/null || true',
     `exec openchamber startup enable --port ${port} --lan --ui-password "$ui_password"`,
+    '',
+  ].join('\n');
+}
+
+/** The guest-side OPENCODE_MODELS_URL write — a POSIX sh script: writes
+ *  the value to a green-field env file and sources it from ~/.zprofile
+ *  (the OpenChamber re-snapshot sources that file before it re-creates
+ *  the LaunchAgent, so the export lands in the service environment) and
+ *  ~/.zshrc (interactive shells). The env file's
+ *  `export OPENCODE_MODELS_URL` line is what shells need to pass the
+ *  variable to child processes. opencode fetches
+ *  `${OPENCODE_MODELS_URL}/api.json` for the model registry (models.dev
+ *  format) — a custom registry is what makes private provider models
+ *  (e.g. tokenguard) resolve in the guest. Prints `env-ok` on success.
+ *
+ * @param url - The registry base URL (the host's OPENCODE_MODELS_URL).
+ * @returns The script text.
+ */
+export function openCodeModelsUrlScript(url: string): string {
+  const envFile = '.config/agent-dev-env/models-url.env';
+  return [
+    'set -e',
+    'mkdir -p "$HOME/.config/agent-dev-env"',
+    `printf "OPENCODE_MODELS_URL='%s'\\nexport OPENCODE_MODELS_URL\\n" '${url}' > "$HOME/${envFile}"`,
+    'touch "$HOME/.zprofile" "$HOME/.zshrc"',
+    'for rc in "$HOME/.zprofile" "$HOME/.zshrc"; do',
+    `  grep -q 'agent-dev-env/models-url.env' "$rc" 2>/dev/null || printf '\\n# Agent dev env models registry\\n. "$HOME/${envFile}"\\n' >> "$rc"`,
+    'done',
+    "printf '%s\\n' 'env-ok'",
     '',
   ].join('\n');
 }

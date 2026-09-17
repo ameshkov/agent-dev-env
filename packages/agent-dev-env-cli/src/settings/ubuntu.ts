@@ -17,8 +17,11 @@ export {
 } from './common.js';
 
 /** Version of the settings copy. Bump when the file set or the copy logic
- *  changes: guests whose marker is older are offered the copy again. */
-export const SETTINGS_VERSION = 3;
+ *  changes: guests whose marker is older are offered the copy again.
+ *  Version 4 adds the OPENCODE_MODELS_URL write (see
+ *  openCodeModelsUrlScript) — existing guests get the copy offered again
+ *  so the variable reaches sandboxes copied by an older CLI. */
+export const SETTINGS_VERSION = 4;
 
 /** The sandbox user in the Ubuntu base image — fixed, so host home paths
  *  are rewritten to it when the settings are copied (see sanitize). */
@@ -76,4 +79,39 @@ export function guestUnpackScript(password: string): string {
  */
 export function openchamberRestartCommand(): string {
   return 'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; systemctl --user restart agent-dev-env-openchamber';
+}
+
+/** The guest-side OPENCODE_MODELS_URL write — a POSIX sh script: writes
+ *  the value to a green-field env file, points the OpenChamber systemd
+ *  user service at it with a drop-in (`EnvironmentFile=`), sources the
+ *  file from the login shells and reloads the user manager so the
+ *  OpenChamber restart picks the variable up. The env file's
+ *  `export OPENCODE_MODELS_URL` line is what shells need to pass the
+ *  variable to child processes; systemd ignores it (no `=`). opencode
+ *  fetches `${OPENCODE_MODELS_URL}/api.json` for the model registry
+ *  (models.dev format) — a custom registry is what makes private provider
+ *  models (e.g. tokenguard) resolve in the guest. Prints `env-ok` on
+ *  success.
+ *
+ * @param url - The registry base URL (the host's OPENCODE_MODELS_URL).
+ * @returns The script text.
+ */
+export function openCodeModelsUrlScript(url: string): string {
+  const envFile = '.config/agent-dev-env/models-url.env';
+  const dropIn =
+    '.config/systemd/user/agent-dev-env-openchamber.service.d/agent-dev-env-models-url.conf';
+  return [
+    'set -e',
+    'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
+    'mkdir -p "$HOME/.config/systemd/user/agent-dev-env-openchamber.service.d" "$HOME/.config/agent-dev-env"',
+    `printf "OPENCODE_MODELS_URL='%s'\\nexport OPENCODE_MODELS_URL\\n" '${url}' > "$HOME/${envFile}"`,
+    `printf '%s\\n' '[Service]' 'EnvironmentFile=%h/${envFile}' > "$HOME/${dropIn}"`,
+    'touch "$HOME/.profile" "$HOME/.bashrc"',
+    'for rc in "$HOME/.profile" "$HOME/.bashrc"; do',
+    `  grep -q 'agent-dev-env/models-url.env' "$rc" 2>/dev/null || printf '\\n# Agent dev env models registry\\n. "$HOME/${envFile}"\\n' >> "$rc"`,
+    'done',
+    'systemctl --user daemon-reload',
+    "printf '%s\\n' 'env-ok'",
+    '',
+  ].join('\n');
 }

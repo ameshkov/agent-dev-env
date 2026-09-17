@@ -3,8 +3,8 @@
 // (green-field ~/.config/agent-dev-env/), the host candidate file set
 // (identical on both — the host is always macOS), the .gitconfig
 // sanitization and the guest-side marker scripts. The per-platform bits
-// live in settings/macos.ts (version 9, /Users/admin, tart transport)
-// and settings/ubuntu.ts (version 3, /home/admin, ssh2 transport).
+// live in settings/macos.ts (version 10, /Users/admin, tart transport)
+// and settings/ubuntu.ts (version 4, /home/admin, ssh2 transport).
 
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';

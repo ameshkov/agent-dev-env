@@ -3,7 +3,9 @@
 // locally (--no-xattrs, AppleDouble stripped), move the archive over
 // SFTP and unpack with ssh exec (the legacy scp + settings_ssh flow, now
 // ssh2). The marker-gated `ensure` flow and the on-demand `sync` flow
-// mirror settings/macos-copy.ts — only the transport differs.
+// mirror settings/macos-copy.ts — only the transport differs, plus the
+// OPENCODE_MODELS_URL write (the OpenChamber systemd user drop-in and
+// the login-shell env file, built by openCodeModelsUrlScript).
 //
 // The guest-side unpack needs the user's password for `sudo -S` (the
 // image up to this release shipped root-owned ~/.local); callers hold
@@ -33,6 +35,7 @@ import {
   guestUnpackScript,
   GUEST_HOME,
   mapGuestPath,
+  openCodeModelsUrlScript,
   openchamberRestartCommand,
   SETTINGS_VERSION,
   type SettingsState,
@@ -107,6 +110,38 @@ function stripAppleDouble(dir: string): void {
   }
 }
 
+/** Sets OPENCODE_MODELS_URL in the guest when the host uses a custom
+ *  opencode model registry — without it the guest loads the public
+ *  models.dev registry and private provider models (e.g. tokenguard)
+ *  resolve to "not found". Writes the systemd user drop-in for the
+ *  OpenChamber service plus the login-shell env file, then reloads the
+ *  user manager (the caller's OpenChamber restart picks the variable up).
+ *  Non-fatal: a failure only degrades the registry, not the copied
+ *  settings.
+ *
+ * @param session - The connected guest session.
+ * @returns True when the variable was written.
+ */
+async function applyModelsUrlEnv(session: SshSession): Promise<boolean> {
+  const modelsUrl = process.env.OPENCODE_MODELS_URL ?? '';
+  if (!modelsUrl) {
+    return false;
+  }
+  if (/[\r\n']/.test(modelsUrl)) {
+    logger.warn('OPENCODE_MODELS_URL contains a quote or newline — not setting it in the guest.');
+    return false;
+  }
+  const env = await session.exec(openCodeModelsUrlScript(modelsUrl));
+  if (env.code !== 0 || !env.stdout.includes('env-ok')) {
+    logger.warn(
+      'could not set OPENCODE_MODELS_URL in the guest — opencode keeps the public model registry.',
+    );
+    return false;
+  }
+  logger.ok('Set OPENCODE_MODELS_URL for OpenChamber and the login shells.');
+  return true;
+}
+
 /** Copies the settings into the guest: staged tree → tar.gz → sftp →
  *  unpack + cleanup, then the version marker (the legacy dance, with the
  *  password piped into sudo -S for the root-owned ~/.local fix).
@@ -165,6 +200,7 @@ async function copySettingsToGuest(
           'they will be offered again on the next run.',
       );
     }
+    await applyModelsUrlEnv(session);
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }

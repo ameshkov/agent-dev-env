@@ -226,9 +226,17 @@ restarts OpenChamber so the new settings take effect, and updates the
 guest's settings marker so the runner won't re-offer the copy on its next
 run. `--yes` skips the confirmation prompt.
 
-On the Windows platforms the copy also writes the host's
-`OPENCODE_MODELS_URL` into the guest when it is set. Windows applies a
-user environment variable only to processes started afterwards, so the
+The Ubuntu, macOS and Windows copies also write the host's
+`OPENCODE_MODELS_URL` into the guest when it is set: opencode resolves
+model IDs against a model registry fetched from
+`${OPENCODE_MODELS_URL}/api.json` (the models.dev format), and a custom
+registry is what makes a private provider's models (e.g. `tokenguard/*`)
+resolve in the guest. Ubuntu points the OpenChamber systemd user service
+at a guest env file (a drop-in with `EnvironmentFile=`) and sources it
+from the login shells; macOS sources the same guest env file from
+`~/.zprofile`/`~/.zshrc`, and the OpenChamber restart re-snapshots the
+LaunchAgent environment from it. Neither needs a reboot. Windows applies
+a user environment variable only to processes started afterwards, so the
 sync then offers to reboot the guest (default: yes) — the reboot makes
 sure OpenChamber and opencode pick it up. Declining leaves the guest
 running; reboot it before relying on the variable. With `--yes` the

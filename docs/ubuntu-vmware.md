@@ -551,6 +551,17 @@ XDG layout):
 | `~/.ssh/*.sh` | same path | SSH helper scripts (e.g. for signing) |
 | `~/.gitconfig` | same path | Git identity, aliases, signing config |
 
+The copy also carries the host's `OPENCODE_MODELS_URL` when it is set:
+opencode resolves model IDs against a model registry (fetched from
+`${OPENCODE_MODELS_URL}/api.json`, the models.dev format) — a custom
+registry is what makes a private provider's models (e.g. `tokenguard/*`)
+resolve in the guest. The copy writes the value to
+`~/.config/agent-dev-env/models-url.env`, points the OpenChamber systemd
+user service at it (a drop-in with `EnvironmentFile=`), sources the file
+from `~/.profile`/`~/.bashrc` for login shells and reloads the user
+manager; the OpenChamber restart that follows the copy picks it up. No
+guest reboot is needed on Ubuntu (unlike Windows).
+
 The step runs **once per VM**: after copying, a versioned marker file inside
 the guest (`~/.config/agent-dev-env/settings-copied`) records the settings
 version that was copied, and later runs skip the step. When new settings are
@@ -573,8 +584,9 @@ your Git identity — run `sync`:
 npx agent-dev-env sync ubuntu-vmware
 ```
 
-It copies exactly the same files as `run` (both share the same code), asks
-for confirmation unless you pass `--yes`, and restarts OpenChamber so the
+It copies exactly the same files as `run` (both share the same code),
+applies the host's `OPENCODE_MODELS_URL` (see above), asks for
+confirmation unless you pass `--yes`, and restarts OpenChamber so the
 new settings take effect. The VM must be running — start it with
 `npx agent-dev-env run ubuntu-vmware` first if it isn't. A sync also
 updates the guest's version marker, so `run` won't re-offer the copy on

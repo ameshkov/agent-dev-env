@@ -590,6 +590,16 @@ credentials and preferences out of the box. What it copies:
 | `~/.ssh/*.sh` | same path | SSH helper scripts (e.g. for signing) |
 | `~/.gitconfig` | same path | Git identity, aliases, signing config |
 
+The copy also carries the host's `OPENCODE_MODELS_URL` when it is set:
+opencode resolves model IDs against a model registry (fetched from
+`${OPENCODE_MODELS_URL}/api.json`, the models.dev format) — a custom
+registry is what makes a private provider's models (e.g. `tokenguard/*`)
+resolve in the guest. The copy writes the value to
+`~/.config/agent-dev-env/models-url.env` and sources it from
+`~/.zprofile`/`~/.zshrc`; the OpenChamber restart that follows the copy
+sources `~/.zprofile` before re-creating the LaunchAgent, so the variable
+lands in the service environment. No guest reboot is needed.
+
 The step runs **once per VM**: after copying, a versioned marker file inside
 the guest (`~/.config/agent-dev-env/settings-copied`) records the settings
 version that was copied, and later runs skip the step. When new settings are
@@ -610,8 +620,9 @@ your Git identity — run `sync`:
 npx agent-dev-env sync macos
 ```
 
-It copies exactly the same files as `run` (both share the same code), asks
-for confirmation unless you pass `--yes`, and restarts OpenChamber so the
+It copies exactly the same files as `run` (both share the same code),
+applies the host's `OPENCODE_MODELS_URL` (see above), asks for
+confirmation unless you pass `--yes`, and restarts OpenChamber so the
 new settings take effect. The VM must be running — start it with
 `npx agent-dev-env run macos` first if it isn't. A sync also updates the
 guest's version marker, so `run` won't re-offer the copy on its next run.
