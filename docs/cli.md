@@ -61,7 +61,7 @@ Runtime requirements (host, macOS only):
 agent-dev-env run <platform> [options]     # macos | windows-qemu | windows-vmware | ubuntu-vmware
 agent-dev-env start <platform> [options]   # alias of run
 agent-dev-env stop <platform>
-agent-dev-env delete <platform> [--yes] [--pristine]   # --pristine: macOS only
+agent-dev-env delete <platform> [--yes] [--pristine]   # --pristine: also the image cache
 agent-dev-env sync <platform> [--yes]                  # macos | ubuntu-vmware
 agent-dev-env status [platform]           # live status of one or all platforms
 agent-dev-env list                        # bundled images: name, platform, image_version
@@ -191,16 +191,28 @@ Stops the sandbox first, then removes it:
   the pristine prompt, default no) the pristine image is deleted too.
 - QEMU / VMware: removes the instance's state dir under the data root
   (`working/<instance>/`: the extracted base's working clone, or the
-  overlay with its TPM and EFI NVRAM). The shared pristine image cache is
-  dropped only when the last instance is deleted — otherwise it stays for
-  the other instances. The next run re-clones the instance. Fusion's VM
-  library may still list the deleted working VM — remove the stale entry
-  in the Fusion UI (harmless).
+  overlay with its TPM and EFI NVRAM). The next run re-clones the
+  instance. Fusion's VM library may still list the deleted working VM —
+  remove the stale entry in the Fusion UI (harmless).
+
+The shared pristine image cache (the pulled image plus the extracted
+base) follows these rules:
+
+- The last instance's deletion drops the cache with it.
+- `--pristine` drops the cache explicitly, including when no instance
+  state is left to delete (e.g. a failed first pull left a truncated
+  archive that a re-run would otherwise trust as the cached image).
+- With another instance remaining the cache is kept instead: a QEMU
+  working disk is a COW overlay backed by the pristine qcow2, and a
+  VMware re-clone needs the cache. The command says so.
+- The delete summary reports whether the cache was removed or where it
+  was kept.
 
 Options:
 
 - `--yes` — do not ask for confirmation.
-- `--pristine` — also delete the pristine image (macOS only).
+- `--pristine` — also delete the pristine image (macOS) / the shared
+  image cache (QEMU, VMware).
 
 ## sync
 

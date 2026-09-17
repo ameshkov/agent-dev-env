@@ -188,7 +188,10 @@ openchamber restart
   under `~/Library/Application Support/agent-dev-env/windows-qemu/<image>/working/<instance>/`.
   The next run re-clones the instance. Other instances keep the shared
   pristine image. Without `--yes` it asks
-  before deleting.
+  before deleting. Add `--pristine` to remove the shared pristine qcow2
+  cache too — also when an interrupted pull left no instance state behind
+  (the cache is kept while another instance remains: its working disk is
+  a COW overlay backed by the pristine qcow2).
 
 - **Run several sandboxes side by side** — set a distinct `SANDBOX_VM`
   per sandbox (instances share the pristine image) and free ports:

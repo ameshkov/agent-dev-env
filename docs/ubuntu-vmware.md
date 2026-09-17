@@ -212,7 +212,10 @@ systemctl --user restart agent-dev-env-openchamber
   under `~/Library/Application Support/agent-dev-env/ubuntu-vmware/<image>/working/<instance>/`.
   The next run re-clones the instance. Other instances keep the shared
   pristine image. Without `--yes` it asks
-  before deleting. Note: Fusion's VM library may still list the deleted
+  before deleting. Add `--pristine` to remove the shared pristine image
+  cache too — also when an interrupted pull left no instance state behind
+  (the cache is kept while another instance remains). Note: Fusion's VM
+  library may still list the deleted
   working VM — remove the
   stale entry in the Fusion UI (harmless).
 

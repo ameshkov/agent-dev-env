@@ -583,7 +583,10 @@ operational incidents.
   `run`/`stop`/`delete`/`sync`/`status` all resolve the instance through
   the same env var; host bridges are keyed by role + port + instance (an
   instance on another instance's port dies with a `SANDBOX_*_PORT` hint,
-  never silently reuses its bridge).
+  never silently reuses its bridge). The pristine cache is deleted with
+  the last instance or explicitly via `delete --pristine` (refused while
+  another instance remains — a QEMU overlay is backed by the pristine
+  qcow2).
 - **Releases**: the two version tracks (CLI + per-image
   `image_version`), their tags, changelogs, and the CI/npm rule are
   described in [Releases, Tags, and Changelogs](#releases-tags-and-changelogs).

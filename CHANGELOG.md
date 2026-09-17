@@ -21,6 +21,16 @@ never removed — changes land there until the next release.
   variable only to processes started afterwards, so without the reboot
   OpenChamber and opencode can keep the old environment. The offer
   defaults to yes; `--yes` accepts it without a prompt.
+- `delete <platform> --pristine` now works for the QEMU and VMware
+  backends too (it was accepted but ignored outside macOS): it drops the
+  shared pristine image cache — the pulled image, the extracted base and
+  the provenance record — including when no instance state is left to
+  delete, so an interrupted first pull no longer leaves a truncated cache
+  that every later run trusts and fails on. While another instance
+  remains the cache is kept (a QEMU working disk is a COW overlay backed
+  by the pristine qcow2, and a VMware re-clone needs the cache) and the
+  command says so; the delete summary now always reports whether the
+  cache was removed or where it was kept.
 
 ### Fixed
 

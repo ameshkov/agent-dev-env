@@ -2,9 +2,12 @@
 // [--pristine]`: stop the sandbox (delegating to the same flow as
 // `stop`), then remove the VM/state. macOS: `tart delete` the working VM
 // (+ the pristine image with --pristine). VMware (Ubuntu + Windows) and
-// QEMU (Windows): `rm -rf` the state dir (extracted base + working clone
-// or overlay/TPM/NVRAM + pulled cache) — the next run re-pulls and
-// re-clones.
+// QEMU (Windows): `rm -rf` the instance's state dir; `--pristine` also
+// drops the shared pristine cache (the pulled image + the extracted
+// base) when no other instance remains — with one, the cache is kept
+// (its working state may depend on it, and re-cloning needs it), and
+// without the flag the cache follows the last-instance rule. The next
+// run re-pulls and re-clones.
 
 import { existsSync, rmSync } from 'node:fs';
 import { run } from '../lib/exec.js';
@@ -95,11 +98,11 @@ async function deleteMacos(options: DeleteOptions): Promise<void> {
 
 /** The VMware delete flow — stop first, then remove the instance's
  *  working state (shared by the Ubuntu and Windows backends). The shared
- *  pristine cache (image/ + base/) is dropped only with the last instance
- *  — other instances keep using it.
+ *  pristine cache (image/ + base/) follows the --pristine /
+ *  last-instance policy (applyPristinePolicy).
  *
  * @param platform - The VMware platform to delete.
- * @param options - --yes flag.
+ * @param options - --yes / --pristine flags.
  */
 async function deleteVmware(platform: Platform, options: DeleteOptions): Promise<void> {
   if (!findVmrun()) {
@@ -118,37 +121,40 @@ async function deleteVmware(platform: Platform, options: DeleteOptions): Promise
   await stopVmware(platform);
 
   logger.step('Deleting the state');
-  if (!existsSync(instanceStateDir)) {
-    logger.info(`No state at ${instanceStateDir} (already deleted?) — nothing to delete.`);
-  } else {
-    const size = await dirSizeHuman(instanceStateDir);
-    const ask =
+  const state = await deleteInstanceState(
+    platform,
+    runOptions,
+    instanceStateDir,
+    (size) =>
       `Delete the sandbox instance state at '${instanceStateDir}' (${size})? ` +
-      `This removes the working clone of '${runOptions.image}' (instance '${runOptions.instance}').`;
-    if (yes || (await confirm(ask, { default: 'y' }))) {
-      logger.cmd(`rm -rf ${instanceStateDir}`);
-      rmSync(instanceStateDir, { recursive: true, force: true });
-      clearCloneRecord(platform, runOptions.image, runOptions.instance);
-      logger.ok(`Instance state deleted: ${instanceStateDir} (${size} freed).`);
-      await removePristineIfLast(platform, runOptions.image, runOptions.instance);
-      logger.warn(
-        "Fusion's VM library may still list the deleted working VM — remove the stale entry in the Fusion UI (harmless).",
-      );
-    } else {
-      logger.info(`Kept '${instanceStateDir}' — nothing was deleted.`);
-    }
+      `This removes the working clone of '${runOptions.image}' (instance '${runOptions.instance}').`,
+    yes,
+  );
+  const pristineRemoved = await applyPristinePolicy(
+    platform,
+    runOptions.image,
+    runOptions.instance,
+    state,
+    options.pristine === true,
+  );
+  if (state === 'removed') {
+    logger.warn(
+      "Fusion's VM library may still list the deleted working VM — remove the stale entry in the Fusion UI (harmless).",
+    );
   }
 
   logger.step('Sandbox deleted');
   logger.info(`State: ${instanceStateDir}`);
+  logger.info(pristineSummary(platform, runOptions.image, pristineRemoved));
   logger.info(`Next run: agent-dev-env run ${platform} (re-clones the instance)`);
 }
 
 /** The QEMU delete flow — stop first (delegating to the stop flow), then
  *  remove the instance's state (working disk overlay + TPM + EFI NVRAM).
- *  The shared pristine qcow2 cache is dropped only with the last instance.
+ *  The shared pristine qcow2 cache follows the --pristine /
+ *  last-instance policy (applyPristinePolicy).
  *
- * @param options - --yes flag.
+ * @param options - --yes / --pristine flags.
  */
 async function deleteQemu(options: DeleteOptions): Promise<void> {
   const runOptions = resolveRunOptions('windows-qemu', { yes: options.yes });
@@ -161,53 +167,152 @@ async function deleteQemu(options: DeleteOptions): Promise<void> {
   await stopQemuSandbox();
 
   logger.step('Deleting the state');
-  if (!existsSync(instanceStateDir)) {
-    logger.info(`No state at ${instanceStateDir} (already deleted?) — nothing to delete.`);
-  } else {
-    const size = await dirSizeHuman(instanceStateDir);
-    const ask =
+  const state = await deleteInstanceState(
+    'windows-qemu',
+    runOptions,
+    instanceStateDir,
+    (size) =>
       `Delete the sandbox instance state at '${instanceStateDir}' (${size})? ` +
       `This removes the working overlay + TPM + EFI NVRAM of '${runOptions.image}' ` +
-      `(instance '${runOptions.instance}').`;
-    if (yes || (await confirm(ask, { default: 'y' }))) {
-      logger.cmd(`rm -rf ${instanceStateDir}`);
-      rmSync(instanceStateDir, { recursive: true, force: true });
-      clearCloneRecord('windows-qemu', runOptions.image, runOptions.instance);
-      logger.ok(`Instance state deleted: ${instanceStateDir} (${size} freed).`);
-      await removePristineIfLast('windows-qemu', runOptions.image, runOptions.instance);
-    } else {
-      logger.info(`Kept '${instanceStateDir}' — nothing was deleted.`);
-    }
-  }
+      `(instance '${runOptions.instance}').`,
+    yes,
+  );
+  const pristineRemoved = await applyPristinePolicy(
+    'windows-qemu',
+    runOptions.image,
+    runOptions.instance,
+    state,
+    options.pristine === true,
+  );
 
   logger.step('Sandbox deleted');
   logger.info(`State: ${instanceStateDir}`);
-  logger.info(`Next run: agent-dev-env run windows-qemu (re-clones the instance)`);
+  logger.info(pristineSummary('windows-qemu', runOptions.image, pristineRemoved));
+  logger.info('Next run: agent-dev-env run windows-qemu (re-clones the instance)');
 }
 
-/** Removes the shared pristine cache (image/ + base/) when the deleted
- *  instance was the last one — other instances must keep it. Image root
- *  removed in full (instancesDir is per-image; only `working` is shared
- *  with live instances and it is empty at this point).
+/** The outcome of the instance-state step: the dir was removed, did not
+ *  exist, or its deletion was declined (kept). */
+type InstanceStateResult = 'removed' | 'absent' | 'kept';
+
+/** Deletes one instance's state dir after confirmation and clears its
+ *  clone record — shared by the VMware and QEMU flows.
+ *
+ * @internal — test-only export; the delete flows call it in this module.
+ * @param platform - The platform (clone-record cleanup).
+ * @param options - The resolved image + instance.
+ * @param dir - The instance state dir.
+ * @param ask - Builds the confirmation question from the dir size.
+ * @param yes - --yes flag.
+ * @returns Whether the state was removed, absent, or kept.
  */
-async function removePristineIfLast(
+export async function deleteInstanceState(
+  platform: Platform,
+  options: { image: string; instance: string },
+  dir: string,
+  ask: (size: string) => string,
+  yes: boolean,
+): Promise<InstanceStateResult> {
+  if (!existsSync(dir)) {
+    logger.info(`No state at ${dir} (already deleted?) — nothing to delete.`);
+    return 'absent';
+  }
+  const size = await dirSizeHuman(dir);
+  if (!(yes || (await confirm(ask(size), { default: 'y' })))) {
+    logger.info(`Kept '${dir}' — nothing was deleted.`);
+    return 'kept';
+  }
+  logger.cmd(`rm -rf ${dir}`);
+  rmSync(dir, { recursive: true, force: true });
+  clearCloneRecord(platform, options.image, options.instance);
+  logger.ok(`Instance state deleted: ${dir} (${size} freed).`);
+  return 'removed';
+}
+
+/** Applies the pristine-cache policy after the instance-state step:
+ *  --pristine drops the shared cache when no other instance remains —
+ *  with one it is kept (a working disk may depend on it, and re-cloning
+ *  needs it) and the user is warned; without the flag the cache follows
+ *  the last-instance rule. A declined instance-state deletion keeps the
+ *  cache too.
+ *
+ * @internal — test-only export; the delete flows call it in this module.
+ * @param platform - The platform.
+ * @param image - The image name.
+ * @param instance - The deleted instance.
+ * @param state - The instance-state outcome.
+ * @param pristine - The --pristine flag.
+ * @returns True when the pristine cache was removed.
+ */
+export async function applyPristinePolicy(
   platform: Platform,
   image: string,
   instance: string,
-): Promise<void> {
+  state: InstanceStateResult,
+  pristine: boolean,
+): Promise<boolean> {
+  if (state === 'kept') {
+    if (pristine) {
+      logger.info('Kept the pristine image cache too — the instance state was kept.');
+    }
+    return false;
+  }
   const remaining = listInstances(platform, image).filter((name) => name !== instance);
+  if (pristine) {
+    if (remaining.length > 0) {
+      logger.warn(
+        `Other instances remain (${remaining.join(', ')}) — keeping the shared pristine image ` +
+          'cache; delete them first to remove it.',
+      );
+      return false;
+    }
+    await dropPristine(platform, image);
+    return true;
+  }
+  if (state !== 'removed') {
+    return false;
+  }
   if (remaining.length > 0) {
     logger.info(
       `Other instances remain (${remaining.join(', ')}) — keeping the shared pristine image.`,
     );
+    return false;
+  }
+  await dropPristine(platform, image);
+  return true;
+}
+
+/** Removes the pristine image root (the pulled image + extracted base +
+ *  provenance record); callers ensure no instance state remains first.
+ *
+ * @param platform - The platform.
+ * @param image - The image name.
+ */
+async function dropPristine(platform: Platform, image: string): Promise<void> {
+  const root = imageRootDir(platform, image);
+  if (!existsSync(root)) {
+    logger.info(`No pristine image cache at ${root} — nothing to delete.`);
     return;
   }
-  const root = imageRootDir(platform, image);
   const size = await dirSizeHuman(root);
   logger.cmd(`rm -rf ${root}`);
   rmSync(root, { recursive: true, force: true });
   clearImageRecord(platform, image);
   logger.ok(`Shared pristine image removed: ${root} (${size} freed).`);
+}
+
+/** The post-delete summary line about the pristine cache — the bare
+ *  "Sandbox deleted" used to imply the cache went with it.
+ *
+ * @param platform - The platform.
+ * @param image - The image name.
+ * @param removed - Whether applyPristinePolicy removed the cache.
+ * @returns The summary line.
+ */
+function pristineSummary(platform: Platform, image: string, removed: boolean): string {
+  return removed
+    ? 'Pristine image cache: removed.'
+    : `Pristine image cache: kept at ${imageRootDir(platform, image)}.`;
 }
 
 /** The instance state dir for a resolved run (VMware). */

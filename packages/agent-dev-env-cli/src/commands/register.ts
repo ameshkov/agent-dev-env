@@ -97,7 +97,7 @@ export function registerVmCommands(program: Command): void {
     .command('delete')
     .argument('<platform>', PLATFORM_CHOICE, parsePlatform)
     .option('--yes', 'do not ask for confirmation')
-    .option('--pristine', 'also delete the pristine image (macOS only, with tart delete)')
+    .option('--pristine', 'also delete the pristine image (macOS) / shared image cache')
     .description('Delete the sandbox VM/state (pristine image too with --pristine)')
     .action(async (platform: Platform, options: object) => {
       process.exitCode = await deleteCmd(platform, options as Parameters<typeof deleteCmd>[1]);
