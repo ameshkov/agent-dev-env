@@ -29,7 +29,7 @@ Windows sandboxes:
 | Guest | Ubuntu 24.04 LTS (ARM64) server | macOS (Apple Silicon) | Windows 11 Pro ARM64 | Windows 11 Pro ARM64 |
 | Shared host folder | Yes (HGFS, `SANDBOX_WORK_DIR` / `--work-dir`) | Yes | No | Yes (HGFS, `SANDBOX_WORK_DIR` / `--work-dir`) |
 | Guest desktop | Yes (GNOME, auto-login; Fusion window) | Yes | Yes (RDP) | Yes (RDP) |
-| Publish artifact | vmx + vmdk (tar.gz) | Tart VM | qcow2 | vmx + vmdk (tar.gz) |
+| Publish artifact | vmx + vmdk (chunked tar.gz) | Tart VM | qcow2 | vmx + vmdk (chunked tar.gz) |
 
 Pick Ubuntu when you want a native Linux agent environment with the full
 open-source toolchain (gcc, cmake, Go, Rust, Node, Python, Ruby) and no
@@ -74,13 +74,15 @@ npx agent-dev-env run ubuntu-vmware
 
 or install the CLI globally (`npm install -g agent-dev-env`) and use
 `agent-dev-env run ubuntu-vmware` everywhere below. On first use it picks
-the image archive: the local build output
+the image: the local build output
 (`~/Library/Application Support/agent-dev-env/build/ubuntu-vmware/...`)
 when present, otherwise it asks to pull
 `sandbox-ubuntu-24-04-arm64-vmware:latest` from GHCR via
-[oras](https://oras.land/) (one-time, ~15 GB — `brew install oras`). It
-then extracts the pristine VM (once; the cache is shared across
-instances) and clones a working VM per instance under
+[oras](https://oras.land/) (one-time, ~15 GB — `brew install oras`). The
+image arrives in 512 MiB chunks fetched one by one, so an interrupted
+pull keeps what it already downloaded and fetches only the missing
+chunks. It then extracts the pristine VM (once; the cache is shared
+across instances) and clones a working VM per instance under
 `~/Library/Application Support/agent-dev-env/ubuntu-vmware/<image>/working/<instance>/`
 (the clone's display name in Fusion's library is the instance name —
 the base keeps the image's name) — the pristine image is never written to.
@@ -122,10 +124,10 @@ skip a bridge, `--no-settings` to skip the host user-settings copy,
 > clone — everything inside the guest is lost; the pristine image is not
 > touched.
 
-The CLI notices when the image itself changes: it records the archive's
-modification time and size (not just its path — a rebuild or `oras pull`
-replaces the archive at the same path), so the next run after a rebuild or
-re-pull asks before re-extracting the pristine VM: the new image requires
+The CLI notices when the image itself changes: it records the pulled
+manifest digest (for locally packed images, a hash of the chunk digests),
+so the next run after a rebuild or a new pull asks before re-extracting
+the pristine VM: the new image requires
 a fresh clone, and the old working clone's guest state (installs, config,
 agent files) is lost with it. The prompt defaults to *no* — declining
 keeps the previous image and the working instances, and the run continues
@@ -237,7 +239,9 @@ systemctl --user restart agent-dev-env-openchamber
 >   npx agent-dev-env run ubuntu-vmware --reset
 > ```
 >
-> The archive must keep the layout the CLI extracts (the vmx and every
+> On first use the CLI splits the tarball into cached chunks next to it
+> (`….tar.gz.parts`) and reuses them until the tarball changes. The
+> archive must keep the layout the CLI extracts (the vmx and every
 > disk it references next to it — the same layout `deploy` publishes), so
 > pack the whole working directory. The `--reset` drops the current
 > working clone first; the CLI then extracts your golden as the new
@@ -625,8 +629,8 @@ run, and wire up the sandbox. Everything it accepts — the full option list
 and the environment variable table — is in [the CLI reference](cli.md);
 notable defaults: image `sandbox-ubuntu-24-04-arm64-vmware`, agent bridge
 port `4400`, Docker bridge port `4401`, `4` CPUs / 8 GB. A local image
-archive can be pinned with `UBUNTU_VMWARE_IMAGE`; `FUSION_APP_PATH`
-overrides the Fusion location.
+can be pinned with `UBUNTU_VMWARE_IMAGE` (a tar.gz or a chunked image
+directory); `FUSION_APP_PATH` overrides the Fusion location.
 
 ## Building your own images
 

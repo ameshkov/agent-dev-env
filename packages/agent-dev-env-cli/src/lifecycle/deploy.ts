@@ -1,17 +1,65 @@
 // deploy.ts — `agent-dev-env deploy`: pushes built images to GHCR (the
 // port of scripts/deploy.sh + the three platform deploy wrappers).
-// macOS images go via tart push; the qcow2/vmware artifacts go via oras
-// push as OCI artifacts (the tar.gz for the VMware pair). The GHCR owner
-// is resolved GHCR_OWNER → --owner → git remote → ameshkov.
+// macOS images go via tart push; the VMware/Ubuntu tar.gz and the QEMU
+// qcow2 are split into fixed-size chunks and pushed via oras as OCI
+// artifacts with one layer per chunk (a single 22 GiB layer dies when
+// GHCR's signed download URL expires mid-transfer; a 512 MiB chunk
+// always fits the window). The GHCR owner is resolved GHCR_OWNER →
+// --owner → git remote → ameshkov.
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { run, runChecked } from '../lib/exec.js';
+import type { RunOptions } from '../lib/exec.js';
 import { findRepoRoot } from '../lib/git.js';
 import { registryRef, resolveOwner } from '../lib/ghcr.js';
 import { logger } from '../lib/logger.js';
+import {
+  PART_MEDIA_TYPE,
+  PART_SIZE_BYTES,
+  QCOW2_ARTIFACT_TYPE,
+  VMWARE_ARTIFACT_TYPE,
+  partsAreCurrent,
+  readPartsRecord,
+  splitFileToParts,
+  type PartsRecord,
+} from '../lib/parts.js';
+import { runCheckedWithRetries, type RetryOptions } from '../lib/retry.js';
+import { ensureVmwareArchiveParts, partsDirOf } from '../lib/vmware-archive.js';
 import { buildDirLayout, duHuman, requireCmd } from './build-shared.js';
 import { type CatalogImage, imageVersion, resolveRequestedImages } from './catalog.js';
+
+/** Push attempts. Blobs are content-addressed, so a retried push resumes
+ *  the transfer instead of restarting it. */
+const PUSH_ATTEMPTS = 3;
+const PUSH_RETRY_DELAY_MS = 5_000;
+const PUSH_RETRY_MAX_DELAY_MS = 60_000;
+
+/** @internal — pushes an image artifact with bounded retries (an
+ *  interrupted push is rethrown at once, never retried). Exported for
+ *  the co-located tests: a real tart/oras push is out of a unit test's
+ *  reach, so the tests exercise the retry wiring with a stub command.
+ *
+ * @param label - The push description used in the retry warnings.
+ * @param cmd - The command (`tart` or `oras`).
+ * @param args - Its argv.
+ * @param options - run() overrides (cwd/stream).
+ * @param retry - Attempt/delay overrides (tests pass zero delays).
+ */
+export async function pushWithRetries(
+  label: string,
+  cmd: string,
+  args: string[],
+  options: RunOptions = {},
+  retry: RetryOptions = {},
+): Promise<void> {
+  await runCheckedWithRetries(cmd, args, options, {
+    label,
+    attempts: PUSH_ATTEMPTS,
+    delayMs: PUSH_RETRY_DELAY_MS,
+    maxDelayMs: PUSH_RETRY_MAX_DELAY_MS,
+    ...retry,
+  });
+}
 
 /** The deploy command options. */
 export interface DeployOptions {
@@ -75,12 +123,11 @@ async function deployMacos(image: CatalogImage, owner: string): Promise<void> {
   const ref = registryRef(image.name, version, owner);
   logger.title(`Pushing image: ${image.name}`);
   logger.info(`Registry: ${ref} and :latest`);
-  await runChecked(
+  await pushWithRetries(
+    `tart push ${image.name}`,
     'tart',
     tartPushArgs(image.name, ref, registryRef(image.name, 'latest', owner)),
-    {
-      stream: true,
-    },
+    { stream: true },
   );
   logger.ok(`Done: ${ref} (and :latest)`);
 }
@@ -97,7 +144,10 @@ export function tartPushArgs(imageName: string, versionRef: string, latestRef: s
   return ['push', imageName, '--chunk-size', '3', versionRef, latestRef];
 }
 
-/** windows-qemu: oras push of the built qcow2 as an OCI artifact.
+/** windows-qemu: split the built qcow2 and oras push one layer per
+ *  chunk. The chunks are deleted after a successful push (the qcow2 in
+ *  the build output stays the source of truth); after a failed push they
+ *  are reused instead of re-split.
  *
  * @param image - The catalog image.
  * @param owner - The GHCR owner.
@@ -111,42 +161,59 @@ async function deployQemu(image: CatalogImage, owner: string): Promise<void> {
     );
   }
   requireCmd('oras', 'brew install oras');
+  const partsDir = partsDirOf(dirs.output);
+  let record = partsAreCurrent([artifact], partsDir) ? readPartsRecord(partsDir) : undefined;
+  if (!record) {
+    logger.step(`splitting ${artifact} into ${PART_SIZE_BYTES / (1024 * 1024)} MiB chunks`);
+    record = await splitFileToParts(artifact, partsDir, {
+      kind: 'qcow2',
+      artifactType: QCOW2_ARTIFACT_TYPE,
+    });
+  }
   const version = imageVersion(image);
   const ref = `${registryRef(image.name, version, owner)},latest`;
   logger.title(`Pushing image: ${image.name}`);
   logger.info(`Registry: ${registryRef(image.name, version, owner)} and :latest`);
-  logger.info(`Artifact: ${artifact} (${await duHuman(artifact)})`);
-  await runChecked(
+  logger.info(`Artifact: ${artifact} in ${record.parts.length} chunks`);
+  await pushWithRetries(
+    `oras push ${image.name} (${record.parts.length} chunks)`,
     'oras',
-    orasPushArgs(ref, `${image.name}.qcow2`, 'application/vnd.agent-dev-env.qcow2'),
-    {
-      cwd: dirs.output,
-      stream: true,
-    },
+    orasPushPartsArgs(ref, QCOW2_ARTIFACT_TYPE, record),
+    { cwd: partsDir, stream: true },
   );
+  rmSync(partsDir, { recursive: true, force: true });
   logger.ok(`Done: ${registryRef(image.name, version, owner)} (and :latest)`);
 }
 
-/** @internal — the oras push argv (bare file name — oras rejects absolute
- *  paths and stores the file under the name it is given; test-only
- *  export).
+/** @internal — the oras push argv for a chunked image (one layer per
+ *  part, in order; the bare names are resolved against the cwd — oras
+ *  rejects absolute paths and stores each file under the name it is
+ *  given; test-only export).
  *
  * @param ref - The `registry:version,latest` ref.
- * @param file - The bare file name in the cwd.
  * @param artifactType - The OCI artifact media type.
+ * @param record - The parts record to push.
  * @returns The oras argv.
  */
-export function orasPushArgs(ref: string, file: string, artifactType: string): string[] {
+export function orasPushPartsArgs(
+  ref: string,
+  artifactType: string,
+  record: PartsRecord,
+): string[] {
   return [
     'push',
     '--artifact-type',
     artifactType,
+    '--concurrency',
+    '5',
     ref,
-    `${file}:application/vnd.oci.image.layer.v1.tar`,
+    ...record.parts.map((part) => `${part.name}:${PART_MEDIA_TYPE}`),
   ];
 }
 
-/** windows-vmware / ubuntu-vmware: tar.gz of the VM dir, then oras push.
+/** windows-vmware / ubuntu-vmware: pack the build output into chunks
+ *  (reusing a current chunk set — a redeploy after a failed push skips
+ *  the 22 GiB repack), then oras push.
  *
  * @param image - The catalog image.
  * @param owner - The GHCR owner.
@@ -159,45 +226,21 @@ async function deployVmware(image: CatalogImage, owner: string): Promise<void> {
       `no built image at ${vmx}\n       Build it first: agent-dev-env build ${image.name}`,
     );
   }
-  const artifact = join(dirs.output, `${image.name}.tar.gz`);
-  logger.step(`packing ${artifact} (excluding vmware logs)`);
-  await packageVmwareTar(dirs.output, image.name, artifact);
   requireCmd('oras', 'brew install oras');
+  const record = await ensureVmwareArchiveParts(dirs.output, image.name);
+  const partsDir = partsDirOf(dirs.output);
   const version = imageVersion(image);
   const ref = `${registryRef(image.name, version, owner)},latest`;
   logger.title(`Pushing image: ${image.name}`);
   logger.info(`Registry: ${registryRef(image.name, version, owner)} and :latest`);
-  logger.info(`Artifact: ${artifact} (${await duHuman(artifact)})`);
-  await runChecked(
+  logger.info(
+    `Artifact: ${record.parts.length} chunks (${await duHuman(partsDir)}; ${PART_SIZE_BYTES / (1024 * 1024)} MiB each)`,
+  );
+  await pushWithRetries(
+    `oras push ${image.name} (${record.parts.length} chunks)`,
     'oras',
-    orasPushArgs(ref, `${image.name}.tar.gz`, 'application/vnd.agent-dev-env.vmware-vm'),
-    {
-      cwd: dirs.output,
-      stream: true,
-    },
+    orasPushPartsArgs(ref, VMWARE_ARTIFACT_TYPE, record),
+    { cwd: partsDir, stream: true },
   );
   logger.ok(`Done: ${registryRef(image.name, version, owner)} (and :latest)`);
-}
-
-/** @internal — packages the runnable VM (vmx + nvram + vmdks, no logs)
- *  into one tar.gz for oras (test-only export; consumers get a single
- *  pull artifact to extract).
- *
- * @param outputDir - Packer's output dir (cwd for the relative names).
- * @param imageName - The image name (file prefix).
- * @param artifact - The tar.gz to create.
- */
-export async function packageVmwareTar(
-  outputDir: string,
-  imageName: string,
-  artifact: string,
-): Promise<void> {
-  const vmdks = readdirSync(outputDir)
-    .filter((file) => file.endsWith('.vmdk'))
-    .sort();
-  const files = [`${imageName}.vmx`, `${imageName}.nvram`, ...vmdks];
-  const res = await run('tar', ['-czf', artifact, ...files], { cwd: outputDir });
-  if (res.code !== 0) {
-    throw new Error(`tar failed: ${res.stderr.trim() || res.stdout.trim()}`);
-  }
 }

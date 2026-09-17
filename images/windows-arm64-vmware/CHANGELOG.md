@@ -13,6 +13,22 @@ the next release.
 
 ## [Unreleased]
 
+## [windows-arm64-vmware-v2.0.0] - 2026-09-17
+
+### Changed
+
+- **Breaking:** the image is published as a chunked artifact — the
+  vmx + nvram + vmdk tar.gz is split into fixed-size 512 MiB chunks, one
+  OCI layer per chunk (`application/vnd.agent-dev-env.image-part`),
+  instead of one ~22 GiB layer. GHCR's signed download URL expires a few
+  minutes after it is issued, so the single-layer pull was cut about a
+  third of the way through and every retry restarted from zero; a
+  chunked image is pulled chunk by chunk and a retry fetches only the
+  missing chunks. Chunked images require an `agent-dev-env` CLI with
+  chunked-image support and are not readable by older CLIs, which in
+  turn cannot pull this image; the guest contents are unchanged
+  (repackaging only).
+
 ## [windows-arm64-vmware-v1.1.1] - 2026-09-16
 
 ### Fixed
@@ -150,7 +166,8 @@ the next release.
   macOS-flavored and not installed into Windows guests yet; the shared
   folder is best-effort (HGFS must be enabled by VMware Tools).
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/windows-arm64-vmware-v1.1.1...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/windows-arm64-vmware-v2.0.0...HEAD
+[windows-arm64-vmware-v2.0.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-vmware-v2.0.0
 [windows-arm64-vmware-v1.1.1]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-vmware-v1.1.1
 [windows-arm64-vmware-v1.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-vmware-v1.1.0
 [windows-arm64-vmware-v1.0.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-vmware-v1.0.0

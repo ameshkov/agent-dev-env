@@ -79,7 +79,10 @@ options, and behavior.
 
 Starts — and automatically wires up — the chosen sandbox VM. On first use
 it picks the image (local build output first, then asks to pull `:latest`
-from GHCR via `oras`), creates the working VM, boots it, bridges the host's
+from GHCR via `oras` in 512 MiB chunks — every chunk fetch is retried
+with bounded backoff, and an interrupted pull keeps the chunks it already
+downloaded and fetches only the missing ones), creates the working VM,
+boots it, bridges the host's
 SSH agent and Docker engine into the guest, installs the guest-side agent
 (bridges + rules), copies your host user settings where supported
 (`macos`, `windows-qemu`, `windows-vmware`, `ubuntu-vmware`), and verifies
@@ -200,8 +203,8 @@ base) follows these rules:
 
 - The last instance's deletion drops the cache with it.
 - `--pristine` drops the cache explicitly, including when no instance
-  state is left to delete (e.g. a failed first pull left a truncated
-  archive that a re-run would otherwise trust as the cached image).
+  state is left to delete (e.g. a failed first pull left only chunks
+  behind).
 - With another instance remaining the cache is kept instead: a QEMU
   working disk is a COW overlay backed by the pristine qcow2, and a
   VMware re-clone needs the cache. The command says so.
@@ -287,11 +290,26 @@ subset. `agent-dev-env deploy --help` lists the available images (the
 same catalog `build --help` shows):
 
 - macOS: `tart push --chunk-size 3` — version tag + `:latest`;
-- windows-qemu: `oras push` of the qcow2 as the
+- windows-qemu: split the qcow2 into 512 MiB chunks and `oras push`
+  them, one OCI layer per chunk, as the
   `application/vnd.agent-dev-env.qcow2` artifact;
 - windows-vmware / ubuntu-vmware: pack the output into a tar.gz (vmx,
-  nvram, vmdk; logs excluded) and `oras push` as
+  nvram, vmdk; logs excluded), split it into 512 MiB chunks and
+  `oras push` them, one OCI layer per chunk, as
   `application/vnd.agent-dev-env.vmware-vm`.
+
+Every chunk layer carries the `application/vnd.agent-dev-env.image-part`
+media type; the pull fetches chunks individually and re-fetches only the
+missing or truncated ones (a single 22 GiB layer dies when GHCR's signed
+download URL expires mid-transfer). Chunked images are only readable by
+CLIs that understand the chunk layout — images published the old way must
+be re-deployed.
+
+Every chunk fetch and push is retried with bounded exponential backoff
+(`lib/retry.ts`): the manifests, each `oras blob fetch`, the chunked
+`oras push`, and macOS `tart pull`/`tart push`. Content-addressed blobs
+make a retried transfer resume instead of restarting, and a Ctrl+C
+interrupt is never retried.
 
 Owner resolution: `GHCR_OWNER` env → `--owner` flag → git remote setup
 (inside a checkout) → default `ameshkov`. Images live flat as
@@ -347,8 +365,8 @@ so existing invocations keep working:
 | `SANDBOX_CPU_COUNT` | per platform | CPUs for a freshly created working VM |
 | `SANDBOX_MEMORY_MB` | per platform | RAM for a freshly created working VM, in MB |
 | `WINDOWS_IMAGE` | — | Path to a local `sandbox-windows-11-arm64-qemu.qcow2` to run instead of the discovered/pulled one |
-| `WINDOWS_VMWARE_IMAGE` | — | Path to a local Windows VMware tar.gz |
-| `UBUNTU_VMWARE_IMAGE` | — | Path to a local Ubuntu tar.gz |
+| `WINDOWS_VMWARE_IMAGE` | — | Local Windows image: a chunked image directory or a tar.gz of the VM dir (split into cached chunks on first use) |
+| `UBUNTU_VMWARE_IMAGE` | — | Local Ubuntu image: a chunked image directory or a tar.gz of the VM dir (split into cached chunks on first use) |
 | `WINDOWS_PASSWORD` | from the vars file | Administrator password in the Windows guest |
 | `UBUNTU_PASSWORD` | from the vars file | `admin` password in the Ubuntu guest |
 | `FUSION_APP_PATH` | `/Applications/VMware Fusion.app` | VMware Fusion install location |

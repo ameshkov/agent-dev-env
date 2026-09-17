@@ -13,9 +13,10 @@ import { join } from 'node:path';
 import { defaultImageFor, imageVersion, type CatalogImage } from '../lifecycle/catalog.js';
 import { isAlive, readPidFile, run } from '../lib/exec.js';
 import { logger } from '../lib/logger.js';
-import { imageRootDir, instanceDir, listInstances } from '../lib/paths.js';
+import { imageRootDir, instanceDir, listInstances, vmwarePartsDir } from '../lib/paths.js';
+import { readPartsRecord } from '../lib/parts.js';
 import { PLATFORMS, type Platform } from '../lib/platform.js';
-import { qemuImagePath, qemuPidFile, qemuStateDir, qemuWorkingDir } from '../lib/qemu.js';
+import { qemuImageReady, qemuPidFile, qemuStateDir, qemuWorkingDir } from '../lib/qemu.js';
 import {
   CLONE_RECORD_MISSING,
   describeCloneRecord,
@@ -150,7 +151,7 @@ async function readQemuStatus(
   const name = image.name;
   const stateDir = qemuStateDir(name);
 
-  details.push(existsSync(qemuImagePath(name)) ? 'image: pulled' : 'image: not pulled');
+  details.push(qemuImageReady(name) ? 'image: pulled' : 'image: not pulled');
   const imageRecord = readImageRecord(platform, name);
   if (imageRecord) {
     details.push(`image source: ${describeImageRecord(imageRecord)}`);
@@ -204,10 +205,12 @@ async function readVmwareStatus(
 ): Promise<void> {
   const name = image.name;
   const stateDir = imageRootDir(platform, name);
-  const archive = join(stateDir, 'image', `${name}.tar.gz`);
+  const partsDir = vmwarePartsDir(platform, name);
   const baseDir = join(stateDir, 'base');
 
-  details.push(existsSync(archive) || existsSync(baseDir) ? 'image: pulled' : 'image: not pulled');
+  details.push(
+    readPartsRecord(partsDir) || existsSync(baseDir) ? 'image: pulled' : 'image: not pulled',
+  );
   const imageRecord = readImageRecord(platform, name);
   if (imageRecord) {
     details.push(`image source: ${describeImageRecord(imageRecord)}`);

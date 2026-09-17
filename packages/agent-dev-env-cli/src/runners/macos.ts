@@ -169,8 +169,9 @@ async function pullSandboxImage(context: RunContext): Promise<void> {
   const ref = registryRef(context.image, 'latest', owner);
   const hint = PLATFORM_DEFAULTS[context.platform].downloadHint;
   logger.info(`Pulling ${ref} (one-time, ${hint} download)...`);
-  const res = await pullImage(ref);
-  if (res.code !== 0) {
+  try {
+    await pullImage(ref);
+  } catch {
     logger.die(
       'pull failed — check your network connection (public GHCR images pull without a login).',
     );

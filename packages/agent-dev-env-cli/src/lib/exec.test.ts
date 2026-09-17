@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isAlive, killTree, run, sleep, spawnDetached, withTimeout } from './exec.js';
 
@@ -156,6 +157,25 @@ describe('run signal forwarding', () => {
     process.emit('SIGTERM');
     const res = await withTimeout(result, 5000, 'run() did not settle after SIGTERM');
     expect(res.code).toBe(143);
+  });
+});
+
+describe('run stdin option', () => {
+  it('pipes a stream to the child stdin without buffering it', async () => {
+    const res = await run(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], {
+      stdin: Readable.from([Buffer.from('stream-one'), Buffer.from('-stream-two')]),
+    });
+    expect(res.code).toBe(0);
+    expect(res.stdout).toBe('stream-one-stream-two');
+  });
+
+  it('rejects when both input and stdin are given', async () => {
+    await expect(
+      run(process.execPath, ['-e', ''], {
+        input: 'text',
+        stdin: Readable.from(['stream']),
+      }),
+    ).rejects.toThrow(/either input or stdin/);
   });
 });
 

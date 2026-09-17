@@ -8,30 +8,39 @@
 // Homebrew edk2 template). Port of run-windows-qemu-sandbox.sh
 // §step 1/2 (pick_image + ensure_working_vm).
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { commandExists, run } from '../lib/exec.js';
 import { registryRef, resolveOwner } from '../lib/ghcr.js';
 import { logger } from '../lib/logger.js';
 import { buildDir } from '../lib/paths.js';
+import { createPartsReadStream, partsIdentity, type PartsRecord } from '../lib/parts.js';
 import { confirmDefault } from '../lib/prompt.js';
-import {
-  clearCloneRecord,
-  recordClone,
-  resolveRegistryDigest,
-  writeImageRecord,
-} from '../lib/provenance.js';
+import { clearCloneRecord, recordClone, writeImageRecord } from '../lib/provenance.js';
 import {
   backingIdentity,
   QEMU_EFI_VARS_TEMPLATE,
   qemuBackingMarker,
   qemuEfivarsPath,
   qemuImagePath,
+  qemuImageReady,
+  qemuImageVerified,
   qemuOverlayPath,
+  qemuPartsDir,
   qemuTpmDir,
   qemuWorkingDir,
 } from '../lib/qemu.js';
 import type { RunContext, RunState } from './framework.js';
+import { pullImageParts } from './parts-pull.js';
 
 /** The env var holding a local qcow2 override (the legacy WINDOWS_IMAGE). */
 const IMAGE_OVERRIDE_ENV = 'WINDOWS_IMAGE';
@@ -39,7 +48,8 @@ const IMAGE_OVERRIDE_ENV = 'WINDOWS_IMAGE';
 /** Step 1: select the pristine qcow2 and create the working VM state.
  *
  * @param context - The run context.
- * @param state - The accumulated run state (imageArchive = disk path).
+ * @param state - The accumulated run state (imageArchive = the qcow2 or
+ *   the transient parts staging dir while pulling).
  */
 export async function ensureQemuImage(context: RunContext, state: RunState): Promise<void> {
   const disk = await pickQemuImage(context);
@@ -49,7 +59,8 @@ export async function ensureQemuImage(context: RunContext, state: RunState): Pro
 }
 
 /** The shell's pick_image: WINDOWS_IMAGE → local build output → cached
- *  pull → oras pull (confirm + owner chain).
+ *  pull (the assembled qcow2 + its verified marker) → chunked oras pull
+ *  (confirm + owner chain) + assembly.
  *
  * @param context - The run context.
  * @returns The qcow2 path to run.
@@ -69,18 +80,19 @@ async function pickQemuImage(context: RunContext): Promise<string> {
     return local;
   }
   const cached = qemuImagePath(image);
-  if (existsSync(cached)) {
+  if (qemuImageReady(image)) {
     return cached;
   }
   return pullQemuImage(context, cached);
 }
 
-/** The oras pull into the image/ cache dir (owner chain + confirm +
- *  disk presence check).
+/** The chunked pull into the transient image/parts staging dir, then the
+ *  qcow2 assembly. The chunks are deleted only after the assembled disk
+ *  is verified, so a killed run resumes at chunk granularity.
  *
  * @param context - The run context.
  * @param cached - The destination qcow2 path.
- * @returns The pulled qcow2 path.
+ * @returns The assembled qcow2 path.
  */
 async function pullQemuImage(context: RunContext, cached: string): Promise<string> {
   if (!commandExists('oras')) {
@@ -101,25 +113,64 @@ async function pullQemuImage(context: RunContext, cached: string): Promise<strin
       `aborted — no sandbox image available. Set ${IMAGE_OVERRIDE_ENV} to a local qcow2 or pull manually.`,
     );
   }
+  const partsDir = qemuPartsDir(context.image);
   mkdirSync(dirname(cached), { recursive: true });
-  logger.info(`Pulling ${ref} (one-time, ~14 GB download)...`);
-  const res = await run('oras', ['pull', ref], { cwd: dirname(cached) });
-  if (res.code !== 0) {
+  logger.info(`Pulling ${ref} (one-time, ~14 GB download in 512 MiB chunks)...`);
+  const record = await pullQemuChunks(ref, partsDir);
+  try {
+    await assembleQemuImage(partsDir, record, cached);
+  } catch (err) {
     logger.die(
-      'oras pull failed — check your network connection (public GHCR images pull without a login).',
+      `failed to assemble the image: ${(err as Error).message}\n       Re-run the command to retry — downloaded chunks are kept.`,
     );
   }
-  if (!existsSync(cached)) {
-    logger.die(`oras pull produced no ${cached} — is the image published under ${ref}?`);
-  }
-  const digest = await resolveRegistryDigest(ref);
+  writeFileSync(qemuImageVerified(context.image), partsIdentity(record));
+  rmSync(partsDir, { recursive: true, force: true });
   writeImageRecord({
     platform: 'windows-qemu',
     image: context.image,
     registryRef: ref,
-    digest,
+    digest: record.manifestDigest ?? undefined,
   });
   return cached;
+}
+
+/** The chunked pull with the retry hint (a killed pull keeps the chunks
+ *  it already completed). */
+async function pullQemuChunks(ref: string, partsDir: string): Promise<PartsRecord> {
+  try {
+    return await pullImageParts({ ref, partsDir });
+  } catch (err) {
+    throw new Error(
+      `image pull failed: ${(err as Error).message}\n       Re-run the command to retry — downloaded chunks are kept.`,
+      { cause: err },
+    );
+  }
+}
+
+/** @internal — streams the chunks into the pristine qcow2 and verifies
+ *  the assembled size (a short assembly must never become the overlay's
+ *  backing file). Test-only export.
+ *
+ * @param partsDir - The parts directory to read.
+ * @param record - The parts record.
+ * @param dest - The qcow2 path to write.
+ * @throws Error when the pipeline fails or the assembled size does not
+ *   match the record's totalSize.
+ */
+export async function assembleQemuImage(
+  partsDir: string,
+  record: PartsRecord,
+  dest: string,
+): Promise<void> {
+  logger.cmd(`cat ${record.parts.length} chunks (${partsDir}) > ${dest}`);
+  await pipeline(createPartsReadStream(partsDir, record.parts), createWriteStream(dest));
+  const size = statSync(dest).size;
+  if (size !== record.totalSize) {
+    throw new Error(
+      `assembled ${dest} has ${size} bytes, expected ${record.totalSize} — re-run to re-pull`,
+    );
+  }
 }
 
 /** Creates the working VM state on first use: a COW overlay over the

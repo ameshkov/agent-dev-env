@@ -38,16 +38,17 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-/** Seeds an image root: the pulled archive, the extracted base and the
+/** Seeds an image root: the pulled chunks, the extracted base and the
  *  provenance record (the pristine cache the policy removes).
  *
  * @returns The image root path.
  */
 function seedPristine(): string {
   const root = paths.imageRootDir(PLATFORM, IMAGE);
-  mkdirSync(join(root, 'image'), { recursive: true });
+  mkdirSync(paths.vmwarePartsDir(PLATFORM, IMAGE), { recursive: true });
   mkdirSync(join(root, 'base'), { recursive: true });
-  writeFileSync(join(root, 'image', `${IMAGE}.tar.gz`), 'archive');
+  writeFileSync(join(paths.vmwarePartsDir(PLATFORM, IMAGE), 'parts.json'), '{"version":1}');
+  writeFileSync(join(paths.vmwarePartsDir(PLATFORM, IMAGE), 'part-0000'), 'chunk');
   writeFileSync(join(root, 'base', `${IMAGE}.vmx`), 'vmx');
   prov.writeImageRecord({
     platform: PLATFORM,

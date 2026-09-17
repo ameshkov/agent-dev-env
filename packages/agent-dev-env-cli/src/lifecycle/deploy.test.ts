@@ -1,10 +1,34 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { run } from '../lib/exec.js';
+import {
+  PART_MEDIA_TYPE,
+  QCOW2_ARTIFACT_TYPE,
+  VMWARE_ARTIFACT_TYPE,
+  type PartsRecord,
+} from '../lib/parts.js';
 import { resolveRequestedImages } from './catalog.js';
-import { orasPushArgs, packageVmwareTar, tartPushArgs } from './deploy.js';
+import { orasPushPartsArgs, pushWithRetries, tartPushArgs } from './deploy.js';
+
+/** A minimal parts record for argv assertions. */
+function partsRecord(): PartsRecord {
+  return {
+    version: 1,
+    kind: 'tar.gz',
+    artifactType: VMWARE_ARTIFACT_TYPE,
+    registryRef: 'ghcr.io/me/img:1.2.0',
+    manifestDigest: 'sha256:manifest',
+    partSize: 512 * 1024 * 1024,
+    totalSize: 3 * 512 * 1024 * 1024,
+    createdAt: '2026-09-17T00:00:00.000Z',
+    parts: [
+      { name: 'part-0000', size: 512 * 1024 * 1024, digest: 'sha256:aaaa' },
+      { name: 'part-0001', size: 512 * 1024 * 1024, digest: 'sha256:bbbb' },
+      { name: 'part-0002', size: 512 * 1024 * 1024, digest: 'sha256:cccc' },
+    ],
+  };
+}
 
 describe('deploy arg builders', () => {
   it('tartPushArgs pushes both tags with 3 MB chunks', () => {
@@ -20,20 +44,27 @@ describe('deploy arg builders', () => {
     ]);
   });
 
-  it('orasPushArgs pushes the bare file as an OCI artifact layer', () => {
+  it('orasPushPartsArgs pushes one layer per part, in order', () => {
     expect(
-      orasPushArgs(
-        'ghcr.io/me/img:1.2.0,latest',
-        'img.qcow2',
-        'application/vnd.agent-dev-env.qcow2',
-      ),
+      orasPushPartsArgs('ghcr.io/me/img:1.2.0,latest', VMWARE_ARTIFACT_TYPE, partsRecord()),
     ).toEqual([
       'push',
       '--artifact-type',
-      'application/vnd.agent-dev-env.qcow2',
+      VMWARE_ARTIFACT_TYPE,
+      '--concurrency',
+      '5',
       'ghcr.io/me/img:1.2.0,latest',
-      'img.qcow2:application/vnd.oci.image.layer.v1.tar',
+      `part-0000:${PART_MEDIA_TYPE}`,
+      `part-0001:${PART_MEDIA_TYPE}`,
+      `part-0002:${PART_MEDIA_TYPE}`,
     ]);
+  });
+
+  it('orasPushPartsArgs keeps the QEMU artifact type', () => {
+    const record = { ...partsRecord(), kind: 'qcow2' as const, artifactType: QCOW2_ARTIFACT_TYPE };
+    const argv = orasPushPartsArgs('ghcr.io/me/img:latest', QCOW2_ARTIFACT_TYPE, record);
+    expect(argv).toContain(QCOW2_ARTIFACT_TYPE);
+    expect(argv.filter((arg) => arg.startsWith('part-'))).toHaveLength(3);
   });
 });
 
@@ -46,25 +77,28 @@ describe('deploy target resolution', () => {
   });
 });
 
-describe('packageVmwareTar', () => {
+describe('pushWithRetries', () => {
   let root: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'agent-dev-env-tar-'));
+    root = mkdtempSync(join(tmpdir(), 'agent-dev-env-push-'));
   });
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('packs vmx+nvram+vmdk and excludes the vmware logs', async () => {
-    for (const file of ['img.vmx', 'img.nvram', 'img-1.vmdk', 'vmware.log', 'vmware-2.log']) {
-      writeFileSync(join(root, file), 'x');
-    }
-    const artifact = join(root, 'img.tar.gz');
-    await packageVmwareTar(root, 'img', artifact);
-    const listing = await run('tar', ['-tzf', artifact]);
-    const names = listing.stdout.split('\n').filter(Boolean).sort();
-    expect(names).toEqual(['img-1.vmdk', 'img.nvram', 'img.vmx']);
+  it('retries a push that fails once', async () => {
+    const marker = join(root, 'marker');
+    const script = `if [ -f "${marker}" ]; then exit 0; fi; touch "${marker}"; exit 1`;
+    await expect(
+      pushWithRetries('test push', 'sh', ['-c', script], {}, { delayMs: 0 }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects with the last command failure when every attempt fails', async () => {
+    await expect(
+      pushWithRetries('test push', 'sh', ['-c', 'exit 7'], {}, { attempts: 2, delayMs: 0 }),
+    ).rejects.toThrow(/command failed \(7\)/);
   });
 });

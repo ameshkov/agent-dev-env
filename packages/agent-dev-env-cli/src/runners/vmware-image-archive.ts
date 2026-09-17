@@ -1,47 +1,40 @@
 // runners/vmware-image-archive.ts — step 1a for the VMware backends
 // (ubuntu-vmware and windows-vmware, Phase 4 + Phase 5): pick the image
-// archive (env override → local build output → cached pull → oras pull)
-// and extract the pristine base/ (identity marker = path|size|mtime, so a
-// rebuild over the same path is detected). The clone step lives in
-// vmware-image.ts; the archive layout here MUST match the one
-// lifecycle/deploy.ts packs for oras (relative member names).
+// chunks (env override → local build output → cached pull → chunked
+// oras pull) and extract the pristine base/ (identity marker = the chunk
+// set's manifest digest / part-digest hash, so a rebuild or a new pull is
+// detected). The clone step lives in vmware-image.ts; the chunk layout
+// here MUST match the one lib/vmware-archive.ts packs for deploy.
 //
 // Port of run-{ubuntu,windows}-vmware-sandbox.sh §pick_image + base
 // extraction; the CLI's data dir replaces the legacy one. The
 // per-platform pieces (platform id, the archive override env var) are
 // parameters, so the two VMware backends share one implementation.
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { commandExists, run } from '../lib/exec.js';
 import { registryRef, resolveOwner } from '../lib/ghcr.js';
 import { logger } from '../lib/logger.js';
-import { buildDir, imageRootDir, listInstances, vmwareArchivePath } from '../lib/paths.js';
+import { buildDir, imageRootDir, listInstances, vmwarePartsDir } from '../lib/paths.js';
+import {
+  assertPartsComplete,
+  createPartsReadStream,
+  missingParts,
+  partsAreCurrent,
+  partsIdentity,
+  readPartsRecord,
+  splitFileToParts,
+  PARTS_RECORD_NAME,
+  VMWARE_ARTIFACT_TYPE,
+  type PartsRecord,
+} from '../lib/parts.js';
 import type { Platform } from '../lib/platform.js';
 import { confirmDefault, type ConfirmOptions } from '../lib/prompt.js';
-import { resolveRegistryDigest, writeImageRecord } from '../lib/provenance.js';
+import { writeImageRecord } from '../lib/provenance.js';
+import { ensureVmwareLocalParts, partsDirOf } from '../lib/vmware-archive.js';
 import type { RunContext } from './framework.js';
-
-/** The pristine-archive identity (path|size|mtime; the same scheme as the
- *  QEMU runner's backing-image marker — a rebuild packs the new image at
- *  the SAME path, so the path alone misses it).
- *
- * @param path - The archive path.
- * @param size - File size in bytes.
- * @param mtimeMs - File mtime (ms since epoch).
- * @returns The identity string.
- */
-export function archiveIdentity(path: string, size: number, mtimeMs: number): string {
-  return `${path}|${size}|${Math.floor(mtimeMs / 1000)}`;
-}
+import { pullImageParts } from './parts-pull.js';
 
 /** The base directory of the pristine extraction. */
 function baseDir(platform: Platform, image: string): string {
@@ -61,133 +54,6 @@ export function baseVmx(platform: Platform, image: string): string {
 /** The archive identity marker path. */
 function baseMarker(platform: Platform, image: string): string {
   return join(imageRootDir(platform, image), 'base-archive.txt');
-}
-
-/** @internal — the on-demand archive of the local build output (vmx +
- *  nvram + every vmdk; the member names are explicit so no logs land in
- *  it). The member names MUST be relative to outputDir: tar (bsdtar)
- *  stores an ABSOLUTE member as its full path inside the archive (it only
- *  strips the leading slash), so a '/Users/…/disk.vmdk' member extracts
- *  into base/Users/… and the vmrun clone breaks — the base vmx references
- *  disk.vmdk next to itself. lifecycle/deploy.ts packs the same layout for
- *  oras; keep the two in sync.
- *
- * @param outputDir - The build output dir (cwd for the relative names).
- * @param image - The image name (vmx/nvram file prefix).
- * @param artifact - The tar.gz to create.
- * @returns The raw tar result.
- */
-export async function packVmwareLocalArchive(
-  outputDir: string,
-  image: string,
-  artifact: string,
-): Promise<ReturnType<typeof run>> {
-  const vmdks = readdirSync(outputDir).filter((file) => file.endsWith('.vmdk'));
-  const members = [`${image}.vmx`, `${image}.nvram`, ...vmdks];
-  return run('tar', ['-czf', artifact, ...members], { cwd: outputDir });
-}
-
-/** @internal — whether every .vmdk member of a tar listing sits at the
- *  archive root (the corrupt-pack check for the on-demand archive: a bad
- *  pack stores the disks under the full build path instead).
- *
- * @param members - The tar member names (tar -tzf output lines).
- * @returns True when every .vmdk member is a plain top-level basename.
- */
-export function archiveHasRootDisks(members: string[]): boolean {
-  return members
-    .filter((member) => member.endsWith('.vmdk'))
-    .every((member) => !member.includes('/'));
-}
-
-/** Whether the archive lists its .vmdk members at the archive root (the
- *  archiveHasRootDisks check with the tar listing; an unreadable archive
- *  also counts as invalid — a partially-written one must be re-packed).
- *
- * @param archive - The tar.gz path.
- * @returns True when the archive is readable and its disks are at the root.
- */
-async function archiveDisksAtRoot(archive: string): Promise<boolean> {
-  const res = await run('tar', ['-tzf', archive]);
-  if (res.code !== 0) {
-    return false;
-  }
-  return archiveHasRootDisks(res.stdout.split('\n').map((line) => line.trim()));
-}
-
-/** The verified marker path of the on-demand archive (records the archive
- *  identity once the disks-at-root check passed). */
-function localArchiveMarker(local: string): string {
-  return `${local}.verified`;
-}
-
-/** Whether the local archive already passed the disks-at-root check for
- *  its current version (the marker records the identity). The tar listing
- *  re-decompresses the whole archive, so the check runs ONCE per archive
- *  version — not on every invocation; archives packed by the fixed code
- *  carry a fresh marker and are never listed again.
- *
- * @param local - The on-demand archive path.
- * @returns True when the marker matches the archive's current identity.
- */
-function localArchiveVerified(local: string): boolean {
-  const marker = localArchiveMarker(local);
-  if (!existsSync(marker)) {
-    return false;
-  }
-  const stat = statSync(local);
-  return readFileSync(marker, 'utf8').trim() === archiveIdentity(local, stat.size, stat.mtimeMs);
-}
-
-/** Packs the local build output into the on-demand archive and records
- *  the verified marker (the pack lists the disks relative, so a freshly
- *  packed archive is valid by construction — no listing needed).
- *
- * @param outputDir - The build output dir (cwd for the relative names).
- * @param image - The image name.
- * @param local - The on-demand archive path.
- */
-async function packLocalArchive(outputDir: string, image: string, local: string): Promise<void> {
-  const packed = await packVmwareLocalArchive(outputDir, image, local);
-  if (packed.code !== 0) {
-    logger.die(`failed to pack the local build output:\n${packed.stderr.trim()}`);
-  }
-  const stat = statSync(local);
-  writeFileSync(localArchiveMarker(local), archiveIdentity(local, stat.size, stat.mtimeMs));
-}
-
-/** @internal — Ensures the on-demand archive exists and is valid: packs
- *  it when missing, verifies the disks-at-root layout once per archive
- *  version (marker-gated), re-packs a corrupt one, and records the marker
- *  (test-only export; pickImage calls it within this module).
- *
- * @param outputDir - The build output dir.
- * @param image - The image name.
- * @param local - The on-demand archive path.
- */
-export async function ensureLocalArchive(
-  outputDir: string,
-  image: string,
-  local: string,
-): Promise<void> {
-  if (!existsSync(local)) {
-    logger.info(`No archive yet — packing the local build output into ${local}`);
-    await packLocalArchive(outputDir, image, local);
-    return;
-  }
-  if (localArchiveVerified(local)) {
-    return;
-  }
-  if (await archiveDisksAtRoot(local)) {
-    const stat = statSync(local);
-    writeFileSync(localArchiveMarker(local), archiveIdentity(local, stat.size, stat.mtimeMs));
-    return;
-  }
-  logger.warn(
-    `The local archive ${local} is corrupt (its disks are stored under the build path, not at the archive root) — re-packing it.`,
-  );
-  rmSync(local, { force: true });
-  await packLocalArchive(outputDir, image, local);
 }
 
 /** @internal — the disk filenames a vmx references (only device nodes
@@ -229,7 +95,7 @@ function missingBaseDisks(baseDirPath: string, baseVmxPath: string): string[] {
 }
 
 /** Drops the pristine base and every working instance (used when the
- *  archive changed and when the extracted base turns out incomplete).
+ *  image changed and when the extracted base turns out incomplete).
  *
  * @param platform - The target platform.
  * @param image - The image name.
@@ -239,32 +105,33 @@ function dropBaseState(platform: Platform, image: string): void {
   rmSync(join(imageRootDir(platform, image), 'working'), { recursive: true, force: true });
 }
 
-/** Step 1a: pick the archive and extract the pristine base (the clone
- *  step in vmware-image.ts consumes the returned archive).
+/** Step 1a: pick the image chunks and extract the pristine base (the
+ *  clone step in vmware-image.ts consumes the returned parts dir).
  *
  * @param platform - The target platform (state dir naming).
- * @param overrideEnv - The env var holding a local archive override
- *   (UBUNTU_VMWARE_IMAGE / WINDOWS_VMWARE_IMAGE).
+ * @param overrideEnv - The env var holding a local image override — a
+ *   chunked-image directory or a tar.gz (UBUNTU_VMWARE_IMAGE /
+ *   WINDOWS_VMWARE_IMAGE).
  * @param context - The run context.
- * @returns The archive path the base was extracted from.
+ * @returns The parts directory the base was extracted from.
  */
 export async function ensureVmwareArchive(
   platform: Platform,
   overrideEnv: string,
   context: RunContext,
 ): Promise<string> {
-  const archive = await pickImage(platform, overrideEnv, context);
-  await ensureBase(platform, context, archive);
-  return archive;
+  const partsDir = await pickImage(platform, overrideEnv, context);
+  await ensureBase(platform, context, partsDir);
+  return partsDir;
 }
 
-/** The shell's pick_image: <OVERRIDE_ENV> → local build output (packed on
- *  demand) → cached pull → oras pull with the owner chain.
+/** The shell's pick_image: <OVERRIDE_ENV> → local build output (packed
+ *  on demand) → cached chunks → chunked oras pull with the owner chain.
  *
  * @param platform - The target platform.
  * @param overrideEnv - The environment override variable name.
  * @param context - The run context.
- * @returns The archive path to run.
+ * @returns The parts directory to run from.
  */
 async function pickImage(
   platform: Platform,
@@ -275,46 +142,80 @@ async function pickImage(
   const image = context.image;
   const override = env[overrideEnv];
   if (override) {
-    if (!existsSync(override)) {
-      logger.die(`${overrideEnv} points to a file that does not exist: ${override}`);
-    }
-    return override;
+    return resolveOverride(override, overrideEnv);
   }
   const outputDir = join(buildDir(platform), 'output');
-  const local = join(outputDir, `${image}.tar.gz`);
   if (existsSync(join(outputDir, `${image}.vmx`))) {
-    await ensureLocalArchive(outputDir, image, local);
+    await ensureVmwareLocalParts(outputDir, image);
+    return partsDirOf(outputDir);
   }
-  if (existsSync(local)) {
-    return local;
-  }
-
-  const cached = vmwareArchivePath(platform, image);
-  if (existsSync(cached)) {
+  const cached = vmwarePartsDir(platform, image);
+  const record = readPartsRecord(cached);
+  if (record && missingParts(cached, record).length === 0) {
     return cached;
   }
   return pullImage(platform, overrideEnv, context, cached);
 }
 
-/** The oras pull into the image/ cache dir (owner chain + confirm +
- *  archive presence check).
+/** Resolves a local image override: a directory in the parts layout
+ *  (part-NNNN files + parts.json) is used as-is; a local tar.gz (the
+ *  documented golden-image workflow) is split once into a sibling
+ *  `<archive>.parts` directory and re-split when the tarball changes.
+ *
+ * @param override - The configured path.
+ * @param overrideEnv - The env var name (for error messages).
+ * @returns The validated parts directory.
+ */
+async function resolveOverride(override: string, overrideEnv: string): Promise<string> {
+  if (!existsSync(override)) {
+    throw new Error(`${overrideEnv} points to a path that does not exist: ${override}`);
+  }
+  if (statSync(override).isFile()) {
+    return splitOverrideArchive(override);
+  }
+  const record = readPartsRecord(override);
+  if (!record) {
+    throw new Error(
+      `${overrideEnv} must point to a chunked image directory (part-NNNN files + ${PARTS_RECORD_NAME}) or a local tar.gz: ${override}`,
+    );
+  }
+  assertPartsComplete(override, record);
+  return override;
+}
+
+/** Splits a local tar.gz override into its cached sibling parts
+ *  directory (one-time per archive version). */
+async function splitOverrideArchive(archive: string): Promise<string> {
+  const partsDir = `${archive}.parts`;
+  if (!partsAreCurrent([archive], partsDir)) {
+    logger.info(`Splitting the local image archive ${archive} into chunks (one-time per archive).`);
+    await splitFileToParts(archive, partsDir, {
+      kind: 'tar.gz',
+      artifactType: VMWARE_ARTIFACT_TYPE,
+    });
+  }
+  return partsDir;
+}
+
+/** The chunked oras pull into the image/ cache dir (owner chain +
+ *  confirm + completeness check), then the provenance record.
  *
  * @param platform - The target platform.
  * @param overrideEnv - The environment override variable name (prompts).
  * @param context - The run context.
- * @param cached - The destination archive path.
- * @returns The pulled archive path.
+ * @param partsDir - The destination parts directory.
+ * @returns The pulled parts directory.
  */
 async function pullImage(
   platform: Platform,
   overrideEnv: string,
   context: RunContext,
-  cached: string,
+  partsDir: string,
 ): Promise<string> {
   if (!commandExists('oras')) {
     logger.die(
       'oras is not installed — needed to pull the image (brew install oras). ' +
-        `Set ${overrideEnv} to a local archive to skip.`,
+        `Set ${overrideEnv} to a local chunked image directory to skip.`,
     );
   }
   const owner = await resolveOwner({ owner: context.options.owner, env: context.options.env });
@@ -327,31 +228,75 @@ async function pullImage(
     }))
   ) {
     logger.die(
-      `aborted — no sandbox image available. Set ${overrideEnv} to a local archive or pull manually.`,
+      `aborted — no sandbox image available. Set ${overrideEnv} to a local chunked image directory or pull manually.`,
     );
   }
-  mkdirSync(dirname(cached), { recursive: true });
-  logger.info(`Pulling ${ref} (one-time, ${hint} download)...`);
-  const res = await run('oras', ['pull', ref], { cwd: dirname(cached) });
-  if (res.code !== 0) {
-    logger.die(
-      'oras pull failed — check your network connection (public GHCR images pull without a login).',
-    );
-  }
-  if (!existsSync(cached)) {
-    logger.die(`oras pull produced no ${cached} — is the image published under ${ref}?`);
-  }
-  const digest = await resolveRegistryDigest(ref);
+  mkdirSync(partsDir, { recursive: true });
+  logger.info(`Pulling ${ref} (one-time, ${hint} download in 512 MiB chunks)...`);
+  const record = await pullChunked(ref, partsDir);
   writeImageRecord({
     platform,
     image: context.image,
     registryRef: ref,
-    digest,
+    digest: record.manifestDigest ?? undefined,
   });
-  return cached;
+  removeLegacyCache(platform, context.image);
+  return partsDir;
 }
 
-/** @internal — whether a changed archive should be re-extracted
+/** The chunked pull with the retry hint (a killed pull keeps the chunks
+ *  it already completed). */
+async function pullChunked(ref: string, partsDir: string): Promise<PartsRecord> {
+  try {
+    return await pullImageParts({ ref, partsDir });
+  } catch (err) {
+    throw new Error(
+      `image pull failed: ${(err as Error).message}\n       Re-run the command to retry — downloaded chunks are kept.`,
+      { cause: err },
+    );
+  }
+}
+
+/** Removes the pre-chunking single-file cache after a successful chunked
+ *  pull (it is superseded and would otherwise waste a full image's
+ *  worth of disk). */
+function removeLegacyCache(platform: Platform, image: string): void {
+  const legacy = join(imageRootDir(platform, image), 'image', `${image}.tar.gz`);
+  if (!existsSync(legacy)) {
+    return;
+  }
+  logger.warn(`Removing the legacy single-file image cache ${legacy} (superseded by the chunks).`);
+  rmSync(legacy, { force: true });
+}
+
+/** The parts record of a parts directory (must exist by the time the
+ *  base is extracted).
+ *
+ * @param partsDir - The parts directory.
+ * @returns The record.
+ * @throws Error when the record is missing or unreadable.
+ */
+function requirePartsRecord(partsDir: string): PartsRecord {
+  const record = readPartsRecord(partsDir);
+  if (!record) {
+    throw new Error(
+      `no chunked image record at ${join(partsDir, PARTS_RECORD_NAME)} — re-run to pull the image`,
+    );
+  }
+  return record;
+}
+
+/** The chunk-set identity recorded with the working clone (the
+ *  baseIdentity in clone.json; see lib/provenance.ts).
+ *
+ * @param partsDir - The parts directory.
+ * @returns The identity string.
+ */
+export function archivePartsIdentity(partsDir: string): string {
+  return partsIdentity(requirePartsRecord(partsDir));
+}
+
+/** @internal — whether a changed image should be re-extracted
  *  (test-only export; ensureBase calls it within this module). When
  *  working instances exist the user is asked (default no — declining
  *  keeps the previous base + instances, so the run continues on the old
@@ -381,23 +326,26 @@ export async function shouldReextract(
   );
 }
 
-/** Extracts the pristine archive into base/ (identity-marker gated; an
- *  archive change asks first — declining keeps the previous base +
+/** Extracts the pristine chunks into base/ (identity-marker gated; a
+ *  changed image asks first — declining keeps the previous base +
  *  working instances and the run continues on the old image — then
  *  re-extracts; the extracted base is validated — the disks the vmx
  *  references must sit next to it).
  *
  * @param platform - The target platform.
  * @param context - The run context.
- * @param archive - The archive to extract.
+ * @param partsDir - The parts directory to extract.
  */
-async function ensureBase(platform: Platform, context: RunContext, archive: string): Promise<void> {
+async function ensureBase(
+  platform: Platform,
+  context: RunContext,
+  partsDir: string,
+): Promise<void> {
   const image = context.image;
   const markerPath = baseMarker(platform, image);
   const baseDirPath = baseDir(platform, image);
   const baseVmxPath = baseVmx(platform, image);
-  const stat = statSync(archive);
-  const id = archiveIdentity(archive, stat.size, stat.mtimeMs);
+  const id = partsIdentity(requirePartsRecord(partsDir));
 
   const hadMarker = existsSync(markerPath);
   const marker = hadMarker ? readFileSync(markerPath, 'utf8').trim() : '';
@@ -424,46 +372,50 @@ async function ensureBase(platform: Platform, context: RunContext, archive: stri
     }
     // A corrupt extraction (an old on-demand pack stored the disks under
     // the build path) — drop it; the re-extraction below fails loudly if
-    // the archive itself is the broken one.
+    // the chunked image itself is the broken one.
     logger.warn(
       `The pristine extraction is incomplete (missing ${missing.join(', ')}) — re-extracting.`,
     );
     dropBaseState(platform, image);
   }
   mkdirSync(baseDirPath, { recursive: true });
-  await extractBase(platform, image, archive, id);
+  await extractBase(platform, image, partsDir, id);
 }
 
-/** Extracts the archive into base/ and validates the result: the disks
- *  the vmx references must sit next to it (a corrupt extraction is
- *  re-packed by the run on the next pull), then writes the identity
- *  marker.
+/** Extracts the chunked image into base/ (the parts stream straight
+ *  into tar, so the whole tar.gz is never materialized on disk) and
+ *  validates the result: the disks the vmx references must sit next to
+ *  it, then the identity marker is written.
  *
  * @param platform - The target platform.
  * @param image - The image name.
- * @param archive - The archive to extract.
- * @param id - The archive identity to record in the marker.
+ * @param partsDir - The parts directory to extract.
+ * @param id - The image identity to record in the marker.
+ * @throws Error when the parts record is missing (requirePartsRecord).
  */
 async function extractBase(
   platform: Platform,
   image: string,
-  archive: string,
+  partsDir: string,
   id: string,
 ): Promise<void> {
   const baseDirPath = baseDir(platform, image);
   const baseVmxPath = baseVmx(platform, image);
-  logger.cmd(`tar -xzf ${archive} -C ${baseDirPath}`);
-  const res = await run('tar', ['-xzf', archive, '-C', baseDirPath]);
+  const record = requirePartsRecord(partsDir);
+  logger.cmd(`tar -xzf - -C ${baseDirPath} (${record.parts.length} chunks from ${partsDir})`);
+  const res = await run('tar', ['-xzf', '-', '-C', baseDirPath], {
+    stdin: createPartsReadStream(partsDir, record.parts),
+  });
   if (res.code !== 0) {
-    logger.die(`archive extraction failed:\n${res.stderr.trim()}`);
+    logger.die(`chunked image extraction failed:\n${res.stderr.trim()}`);
   }
   if (!existsSync(baseVmxPath)) {
-    logger.die(`archive extraction produced no ${baseVmxPath} (is the archive valid?)`);
+    logger.die(`chunked image extraction produced no ${baseVmxPath} (is the image valid?)`);
   }
   const missing = missingBaseDisks(baseDirPath, baseVmxPath);
   if (missing.length > 0) {
     logger.die(
-      `archive ${archive} is invalid: the vmx references ${missing.join(', ')} next to itself but the archive does not provide ${missing.length > 1 ? 'them' : 'it'}. Remove the archive and re-run to re-pack it from the local build output.`,
+      `the chunked image in ${partsDir} is invalid: the vmx references ${missing.join(', ')} next to itself but the image does not provide ${missing.length > 1 ? 'them' : 'it'}. Remove it and re-run to pull the image again.`,
     );
   }
   writeFileSync(baseMarker(platform, image), id);

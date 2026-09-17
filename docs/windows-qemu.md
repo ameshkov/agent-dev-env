@@ -66,8 +66,11 @@ the disk image: the local build output
 (`~/Library/Application Support/agent-dev-env/build/windows-qemu/...`)
 when present, otherwise it asks to pull
 `sandbox-windows-11-arm64-qemu:latest` from GHCR via
-[oras](https://oras.land/) (one-time, ~14 GB — `brew install oras`).
-It then creates a working VM per instance — a copy-on-write overlay plus
+[oras](https://oras.land/) (one-time, ~14 GB — `brew install oras`). The
+image arrives in 512 MiB chunks fetched one by one; an interrupted pull
+keeps what it already downloaded, and the working disk is assembled from
+the chunks (they are removed once it is complete). It then creates a
+working VM per instance — a copy-on-write overlay plus
 persistent TPM and EFI state under
 `~/Library/Application Support/agent-dev-env/windows-qemu/<image>/working/<instance>/` —
 the pristine image is never written to. The guest boots headless or in a QEMU

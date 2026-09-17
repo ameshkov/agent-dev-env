@@ -42,13 +42,40 @@ export function qemuStateDir(image: string): string {
   return imageRootDir(PLATFORM, image);
 }
 
-/** <data>/windows-qemu/<image>/image/<image>.qcow2 — the pristine disk
- *  (or the local pull cache).
+/** <data>/windows-qemu/<image>/image/<image>.qcow2 — the assembled
+ *  pristine disk (the COW overlay's backing file).
  * @param image - The image name.
  * @returns The pristine qcow2 path.
  */
 export function qemuImagePath(image: string): string {
   return join(qemuStateDir(image), 'image', `${image}.qcow2`);
+}
+
+/** <data>/windows-qemu/<image>/image/parts — the transient pull staging
+ *  (part-NNNN + parts.json; deleted once the qcow2 is assembled).
+ * @param image - The image name.
+ * @returns The parts staging directory.
+ */
+export function qemuPartsDir(image: string): string {
+  return join(qemuStateDir(image), 'image', 'parts');
+}
+
+/** The marker recording the chunk-set identity the pristine qcow2 was
+ *  assembled from (a partial assembly after a crash must never pass as
+ *  the pristine disk).
+ * @param image - The image name.
+ * @returns The verified marker path.
+ */
+export function qemuImageVerified(image: string): string {
+  return `${qemuImagePath(image)}.verified`;
+}
+
+/** Whether the pristine qcow2 was fully assembled from a chunk set.
+ * @param image - The image name.
+ * @returns True when the qcow2 and its verified marker exist.
+ */
+export function qemuImageReady(image: string): boolean {
+  return existsSync(qemuImagePath(image)) && existsSync(qemuImageVerified(image));
 }
 
 /** <data>/windows-qemu/<image>/working/<instance> — one instance's working

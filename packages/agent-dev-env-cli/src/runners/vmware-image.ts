@@ -13,7 +13,7 @@ import { workingVmxPath } from '../lib/paths.js';
 import type { Platform } from '../lib/platform.js';
 import { recordClone } from '../lib/provenance.js';
 import { cloneVm, setVmDisplayName, upgradeVmHardware, vmwareHwVersion } from '../lib/vmrun.js';
-import { archiveIdentity, baseVmx, ensureVmwareArchive } from './vmware-image-archive.js';
+import { archivePartsIdentity, baseVmx, ensureVmwareArchive } from './vmware-image-archive.js';
 import type { RunContext, RunState } from './framework.js';
 
 /** The working clone's vmx. */
@@ -26,13 +26,13 @@ function hwMarker(platform: Platform, image: string, instance: string): string {
   return join(dirname(vmwareWorkingVmx(platform, image, instance)), '.hw-version');
 }
 
-/** Step 1: select the archive + extract the base (vmware-image-archive.ts),
- *  clone the working VM and upgrade it if the installed Fusion supports a
- *  newer hardware version.
+/** Step 1: select the image chunks + extract the base
+ *  (vmware-image-archive.ts), clone the working VM and upgrade it if the
+ *  installed Fusion supports a newer hardware version.
  *
  * @param platform - The target platform (state dir naming).
- * @param overrideEnv - The env var holding a local archive override
- *   (UBUNTU_VMWARE_IMAGE / WINDOWS_VMWARE_IMAGE).
+ * @param overrideEnv - The env var holding a local chunked-image
+ *   directory override (UBUNTU_VMWARE_IMAGE / WINDOWS_VMWARE_IMAGE).
  * @param context - The run context.
  * @param state - The accumulated run state (imageArchive set here).
  */
@@ -42,10 +42,10 @@ export async function ensureVmwareImage(
   context: RunContext,
   state: RunState,
 ): Promise<void> {
-  const archive = await ensureVmwareArchive(platform, overrideEnv, context);
-  state.imageArchive = archive;
-  logger.ok(`Using archive: ${archive}`);
-  if (!(await ensureWorkingVm(platform, context, archive))) {
+  const partsDir = await ensureVmwareArchive(platform, overrideEnv, context);
+  state.imageArchive = partsDir;
+  logger.ok(`Using image: ${partsDir}`);
+  if (!(await ensureWorkingVm(platform, context, partsDir))) {
     logger.die(
       'could not clone the working VM (see above). Check Fusion\u2019s VM library path and re-run.',
     );
@@ -58,13 +58,13 @@ export async function ensureVmwareImage(
  *
  * @param platform - The target platform.
  * @param context - The run context.
- * @param archive - The archive the pristine base was extracted from.
+ * @param partsDir - The image chunks the pristine base was extracted from.
  * @returns True when the clone exists.
  */
 async function ensureWorkingVm(
   platform: Platform,
   context: RunContext,
-  archive: string,
+  partsDir: string,
 ): Promise<boolean> {
   const image = context.image;
   const instance = context.instance;
@@ -76,7 +76,7 @@ async function ensureWorkingVm(
       instance,
       vm: wVmx,
       type: 'vmx',
-      name: archive,
+      name: partsDir,
       backfilled: true,
       clonedAt: new Date(statSync(wVmx).mtimeMs).toISOString(),
     });
@@ -86,7 +86,7 @@ async function ensureWorkingVm(
   if (!(await cloneWorkingVm(platform, image, wVmx))) {
     return false;
   }
-  return finishWorkingClone(platform, context, archive, wVmx);
+  return finishWorkingClone(platform, context, partsDir, wVmx);
 }
 
 /** `vmrun clone <base> <working> full` with the real error surfaced
@@ -119,14 +119,14 @@ async function cloneWorkingVm(platform: Platform, image: string, wVmx: string): 
  *
  * @param platform - The target platform.
  * @param context - The run context.
- * @param archive - The archive the pristine base was extracted from.
+ * @param partsDir - The image chunks the pristine base was extracted from.
  * @param wVmx - The working vmx.
  * @returns True (the clone is usable regardless of the display name).
  */
 function finishWorkingClone(
   platform: Platform,
   context: RunContext,
-  archive: string,
+  partsDir: string,
   wVmx: string,
 ): boolean {
   logger.cmd(`set displayName "${context.instance}" in ${wVmx}`);
@@ -135,14 +135,14 @@ function finishWorkingClone(
       'could not set the working VM\u2019s display name (Fusion will show the base\u2019s name).',
     );
   }
-  const id = archiveIdentity(archive, statSync(archive).size, statSync(archive).mtimeMs);
+  const id = archivePartsIdentity(partsDir);
   recordClone({
     platform,
     image: context.image,
     instance: context.instance,
     vm: wVmx,
     type: 'vmx',
-    name: archive,
+    name: partsDir,
     baseIdentity: id,
   });
   logger.ok(`Working VM cloned (${wVmx}; display name '${context.instance}').`);

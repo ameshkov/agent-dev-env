@@ -132,7 +132,8 @@ tag via `npx agent-dev-env tag <image>`.
   into the guest (see
   [docs/ubuntu-vmware.md](../../docs/ubuntu-vmware.md)).
 - Publish: `npx agent-dev-env deploy sandbox-ubuntu-24-04-arm64-vmware`
-  packs the output directory into `${image_name}.tar.gz` and pushes it to
+  packs the output directory into `${image_name}.tar.gz`, splits it into
+  512 MiB chunks and pushes them to
   `ghcr.io/<owner>/sandbox-ubuntu-24-04-arm64-vmware:<version>` +
   `:latest` as an OCI artifact via `oras` (the CLI packs and pushes
   directly — no platform wrapper — because `tart push` only works for

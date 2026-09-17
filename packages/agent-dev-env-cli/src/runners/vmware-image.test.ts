@@ -1,26 +1,13 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { run } from '../lib/exec.js';
+import { VMWARE_ARTIFACT_TYPE, splitFileToParts } from '../lib/parts.js';
 import type { RunContext } from './framework.js';
 import type { RunOptions } from './options.js';
-import {
-  archiveHasRootDisks,
-  archiveIdentity,
-  ensureLocalArchive,
-  packVmwareLocalArchive,
-  vmxDiskFiles,
-} from './vmware-image-archive.js';
+import { vmxDiskFiles } from './vmware-image-archive.js';
 
 /** A minimal writable sink the confirm prompt can write to in tests. */
 function outputSink(): { stream: PassThrough; written: () => string } {
@@ -39,39 +26,27 @@ function inputStream(answer: string): PassThrough {
   return stream;
 }
 
-describe('archiveIdentity', () => {
-  it('binds the path, size and mtime (seconds) into one marker', () => {
-    expect(archiveIdentity('/tmp/image.tar.gz', 1234, 1_700_000_123_456)).toBe(
-      '/tmp/image.tar.gz|1234|1700000123',
-    );
+/** Packs a minimal pristine VM (the image's vmx referencing a relative
+ *  disk) and splits it into a chunked-image directory. */
+async function seedChunkedImage(root: string, image: string): Promise<string> {
+  const fixture = join(root, 'fixture');
+  mkdirSync(fixture, { recursive: true });
+  writeFileSync(join(fixture, `${image}.vmx`), 'nvme0:0.filename = "disk.vmdk"');
+  writeFileSync(join(fixture, 'disk.vmdk'), 'disk-bytes');
+  const tarPath = join(fixture, 'image.tar.gz');
+  const packed = await run('tar', ['-czf', tarPath, `${image}.vmx`, 'disk.vmdk'], {
+    cwd: fixture,
   });
-
-  it('detects a rebuild at the same path via size/mtime', () => {
-    const first = archiveIdentity('/tmp/image.tar.gz', 1234, 1_700_000_000_000);
-    const rebuilt = archiveIdentity('/tmp/image.tar.gz', 1235, 1_700_000_000_999);
-    expect(rebuilt).not.toBe(first);
-  });
-});
-
-describe('archiveHasRootDisks', () => {
-  it('accepts top-level .vmdk members', () => {
-    expect(archiveHasRootDisks(['img.vmx', 'img.nvram', 'disk.vmdk'])).toBe(true);
-  });
-
-  it('rejects .vmdk members nested under the build path (the corrupt-pack bug)', () => {
-    expect(
-      archiveHasRootDisks([
-        'img.vmx',
-        'img.nvram',
-        'Users/ameshkov/Library/Application Support/agent-dev-env/build/ubuntu-vmware/output/disk.vmdk',
-      ]),
-    ).toBe(false);
-  });
-
-  it('accepts an archive listing without disks', () => {
-    expect(archiveHasRootDisks(['img.vmx', 'img.nvram'])).toBe(true);
-  });
-});
+  expect(packed.code).toBe(0);
+  const partsDir = join(root, 'parts');
+  await splitFileToParts(
+    tarPath,
+    partsDir,
+    { kind: 'tar.gz', artifactType: VMWARE_ARTIFACT_TYPE },
+    1024,
+  );
+  return partsDir;
+}
 
 describe('vmxDiskFiles', () => {
   it('returns the disk filenames and skips the auto-detect cdrom', () => {
@@ -156,84 +131,88 @@ describe('shouldReextract', () => {
   });
 });
 
-describe('packVmwareLocalArchive', () => {
-  let root: string;
+describe('ensureVmwareArchive with a chunked-image override', () => {
+  const platform = 'ubuntu-vmware' as const;
+  const image = 'sandbox-ubuntu-24-04-arm64-vmware';
+  let tmp: string;
+  let mod: typeof import('./vmware-image-archive.js');
 
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'agent-dev-env-tar-'));
+  beforeEach(async () => {
+    tmp = mkdtempSync(join(tmpdir(), 'agent-dev-env-chunks-'));
+    vi.stubEnv('AGENT_DEV_ENV_DATA_HOME', tmp);
+    vi.resetModules();
+    mod = await import('./vmware-image-archive.js');
   });
 
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+    rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('packs vmx+nvram+vmdk with RELATIVE member names (the disks extract next to the vmx)', async () => {
-    for (const file of ['img.vmx', 'img.nvram', 'img-1.vmdk', 'vmware.log']) {
-      writeFileSync(join(root, file), 'x');
-    }
-    const artifact = join(root, 'img.tar.gz');
-    const res = await packVmwareLocalArchive(root, 'img', artifact);
-    expect(res.code).toBe(0);
-    const listing = await run('tar', ['-tzf', artifact]);
-    const members = listing.stdout.split('\n').filter(Boolean);
-    expect(members.sort()).toEqual(['img-1.vmdk', 'img.nvram', 'img.vmx']);
-    // the regression: absolute members would land inside the build path
-    expect(members.some((member) => member.includes('/'))).toBe(false);
-    const extract = join(root, 'extract');
-    mkdirSync(extract);
-    await run('tar', ['-xzf', artifact, '-C', extract]);
-    expect(existsSync(join(extract, 'img-1.vmdk'))).toBe(true);
-    expect(existsSync(join(extract, 'img.vmx'))).toBe(true);
-  });
-});
+  function context(env: Record<string, string>): RunContext {
+    return {
+      image,
+      instance: 'default-agent-dev-env',
+      options: { platform, yes: false, env } as unknown as RunOptions,
+    } as RunContext;
+  }
 
-describe('ensureLocalArchive', () => {
-  let root: string;
-  let outputDir: string;
-  let local: string;
-  let marker: string;
-
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'agent-dev-env-tar-'));
-    outputDir = join(root, 'output');
-    mkdirSync(outputDir);
-    for (const file of ['img.vmx', 'img.nvram', 'img-1.vmdk', 'vmware.log']) {
-      writeFileSync(join(outputDir, file), 'x');
-    }
-    local = join(outputDir, 'img.tar.gz');
-    marker = `${local}.verified`;
-  });
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  it('packs the missing archive and records the verified marker', async () => {
-    await ensureLocalArchive(outputDir, 'img', local);
-    expect(existsSync(local)).toBe(true);
-    expect(existsSync(marker)).toBe(true);
-    const stat = statSync(local);
-    expect(readFileSync(marker, 'utf8').trim()).toBe(
-      archiveIdentity(local, stat.size, stat.mtimeMs),
+  it('extracts the base from the chunks and records the identity marker', async () => {
+    const partsDir = await seedChunkedImage(tmp, image);
+    const dir = await mod.ensureVmwareArchive(
+      platform,
+      'UBUNTU_VMWARE_IMAGE',
+      context({ UBUNTU_VMWARE_IMAGE: partsDir }),
     );
+    expect(dir).toBe(partsDir);
+
+    const baseDir = join(tmp, platform, image, 'base');
+    expect(existsSync(join(baseDir, `${image}.vmx`))).toBe(true);
+    expect(existsSync(join(baseDir, 'disk.vmdk'))).toBe(true);
+    const marker = readFileSync(join(tmp, platform, image, 'base-archive.txt'), 'utf8').trim();
+    expect(marker).toBe(mod.archivePartsIdentity(partsDir));
   });
 
-  it('does not re-pack an already-verified archive (marker matches the identity)', async () => {
-    await ensureLocalArchive(outputDir, 'img', local);
-    const before = statSync(local).mtimeMs;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    await ensureLocalArchive(outputDir, 'img', local);
-    expect(statSync(local).mtimeMs).toBe(before);
+  it('rejects an override directory that is not a chunked image', async () => {
+    const plain = join(tmp, 'plain');
+    mkdirSync(plain, { recursive: true });
+    await expect(
+      mod.ensureVmwareArchive(
+        platform,
+        'UBUNTU_VMWARE_IMAGE',
+        context({ UBUNTU_VMWARE_IMAGE: plain }),
+      ),
+    ).rejects.toThrow(/chunked image directory/);
   });
 
-  it('re-packs a corrupt archive (disks stored under the build path) and marks it', async () => {
-    // reproduce the old bug: an absolute vmdk member lands under the
-    // build path inside the archive
-    const disk = join(outputDir, 'img-1.vmdk');
-    await run('tar', ['-czf', local, 'img.vmx', 'img.nvram', disk], { cwd: outputDir });
-    await ensureLocalArchive(outputDir, 'img', local);
-    const listing = await run('tar', ['-tzf', local]);
-    expect(archiveHasRootDisks(listing.stdout.split('\n').filter(Boolean))).toBe(true);
-    expect(existsSync(marker)).toBe(true);
+  it('splits a local tar.gz override into cached chunks (the golden-image flow)', async () => {
+    const archive = join(tmp, 'golden.tar.gz');
+    const fixture = join(tmp, 'golden-src');
+    mkdirSync(fixture, { recursive: true });
+    writeFileSync(join(fixture, `${image}.vmx`), 'nvme0:0.filename = "disk.vmdk"');
+    writeFileSync(join(fixture, 'disk.vmdk'), 'disk-bytes');
+    const packed = await run('tar', ['-czf', archive, `${image}.vmx`, 'disk.vmdk'], {
+      cwd: fixture,
+    });
+    expect(packed.code).toBe(0);
+
+    const dir = await mod.ensureVmwareArchive(
+      platform,
+      'UBUNTU_VMWARE_IMAGE',
+      context({ UBUNTU_VMWARE_IMAGE: archive }),
+    );
+    expect(dir).toBe(`${archive}.parts`);
+    expect(existsSync(join(dir, 'parts.json'))).toBe(true);
+    expect(existsSync(join(tmp, platform, image, 'base', 'disk.vmdk'))).toBe(true);
+
+    // A second run reuses the split (no re-split of an unchanged archive).
+    const recordPath = join(dir, 'parts.json');
+    const before = readFileSync(recordPath, 'utf8');
+    await mod.ensureVmwareArchive(
+      platform,
+      'UBUNTU_VMWARE_IMAGE',
+      context({ UBUNTU_VMWARE_IMAGE: archive }),
+    );
+    expect(readFileSync(recordPath, 'utf8')).toBe(before);
   });
 });

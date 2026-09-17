@@ -15,6 +15,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { accessSync, constants as fsConstants, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 
 export interface RunOptions {
   cwd?: string;
@@ -22,6 +23,10 @@ export interface RunOptions {
   env?: Record<string, string | undefined>;
   /** Text written to stdin (default: nothing, stdin is closed). */
   input?: string;
+  /** Streaming stdin, piped as-is (large binaries are never buffered in
+   *  memory: tar stdin extraction, image assembly). Mutually exclusive
+   *  with `input`. */
+  stdin?: Readable;
   /** Kill with SIGKILL when the command runs longer. */
   timeoutMs?: number;
   /** Mirror the child's stdout/stderr to the CLI's own while still
@@ -35,6 +40,45 @@ export interface RunResult {
   stdout: string;
   stderr: string;
   signal?: NodeJS.Signals | null;
+}
+
+/** The error runChecked throws for a non-zero exit. `interrupted` marks
+ *  a command the user stopped (a SIGINT/SIGTERM death or the
+ *  conventional 130/143 exits): the retry helpers must never retry
+ *  those — Ctrl+C has to stop the transfer, not restart it. */
+export class CommandFailedError extends Error {
+  /** The child's exit code (-1 when it never spawned). */
+  readonly code: number;
+  /** The signal that killed the child, if any. */
+  readonly signal: NodeJS.Signals | null;
+  /** True when the child died from SIGINT/SIGTERM. */
+  readonly interrupted: boolean;
+
+  constructor(message: string, code: number, signal: NodeJS.Signals | null) {
+    super(message);
+    this.name = 'CommandFailedError';
+    this.code = code;
+    this.signal = signal;
+    this.interrupted = signal === 'SIGINT' || signal === 'SIGTERM' || code === 130 || code === 143;
+  }
+}
+
+/** Builds the runChecked error for a failed result (shared with callers
+ *  that run a command themselves and retry on top of it).
+ *
+ * @param cmd - The command that failed.
+ * @param args - Its argv.
+ * @param res - The failed result.
+ * @returns The error carrying the exit code and signal.
+ */
+export function commandFailure(cmd: string, args: string[], res: RunResult): CommandFailedError {
+  const detail = (res.stderr.trim() || res.stdout.trim()).trim();
+  return new CommandFailedError(
+    `command failed (${res.code}): ${cmd}${args.length ? ` ${args.join(' ')}` : ''}` +
+      (detail ? `\n${detail}` : ''),
+    res.code,
+    res.signal ?? null,
+  );
 }
 
 /** Git environment variables that git exports while running a hook (e.g.
@@ -79,20 +123,24 @@ function childEnv(overrides?: Record<string, string | undefined>): NodeJS.Proces
  *
  * @param cmd - The command to run.
  * @param args - Command-line arguments.
- * @param options - cwd/env/input/timeout overrides.
- * @returns The exit code + captured output (never rejects; spawn failures
- *   yield code -1 with the error in stderr).
+ * @param options - cwd/env/input/stdin/timeout overrides.
+ * @returns The exit code + captured output (never rejects for a process
+ *   failure; spawn failures yield code -1 with the error in stderr).
+ *   Passing both `input` and `stdin` rejects with an Error.
  */
 export function run(
   cmd: string,
   args: string[] = [],
   options: RunOptions = {},
 ): Promise<RunResult> {
+  if (options.input !== undefined && options.stdin !== undefined) {
+    return Promise.reject(new Error('run(): pass either input or stdin, not both'));
+  }
   return new Promise((resolve) => {
     const child = spawnChild(cmd, args, options);
     const output = { stdout: '', stderr: '' };
     attachStdio(child, output, options.stream === true);
-    writeInput(child, options.input);
+    pipeInput(child, options);
     const removeForwarders = attachSignalForwarders(child);
 
     const timer =
@@ -112,10 +160,15 @@ export function run(
 
     child.on('error', (err) => {
       removeForwarders();
+      options.stdin?.destroy();
       finish({ code: -1, stdout: output.stdout, stderr: err.message, signal: null });
     });
     child.on('close', (code, signal) => {
       removeForwarders();
+      // The child is gone: stop reading the source (tar exits as soon as
+      // it has the stream, and a failed child must not keep the pipeline
+      // draining a 22 GiB parts set).
+      options.stdin?.destroy();
       finish({
         code: code ?? -1,
         stdout: output.stdout,
@@ -183,12 +236,22 @@ function attachStdio(
   });
 }
 
-function writeInput(child: ChildProcessWithoutNullStreams, input: string | undefined): void {
+/** Feeds the child's stdin: either the streaming `stdin` (piped) or the
+ *  `input` string, or nothing (stdin closed). A source-stream error kills
+ *  the child — it would otherwise wait forever for input that never
+ *  comes. */
+function pipeInput(child: ChildProcessWithoutNullStreams, options: RunOptions): void {
   child.stdin.on('error', () => {
     // EPIPE when the child exits before reading stdin — not fatal.
   });
-  if (input !== undefined) {
-    child.stdin.write(input);
+  if (options.stdin) {
+    const stdin = options.stdin;
+    stdin.on('error', () => child.kill('SIGKILL'));
+    stdin.pipe(child.stdin);
+    return;
+  }
+  if (options.input !== undefined) {
+    child.stdin.write(options.input);
   }
   child.stdin.end();
 }
@@ -205,7 +268,7 @@ function armTimeout(child: ChildProcessWithoutNullStreams, ms: number): NodeJS.T
  * @param args - Command-line arguments.
  * @param options - cwd/env/input/timeout overrides.
  * @returns The result on success.
- * @throws Error with the stderr detail on a non-zero exit.
+ * @throws CommandFailedError with the stderr detail on a non-zero exit.
  */
 export async function runChecked(
   cmd: string,
@@ -214,11 +277,7 @@ export async function runChecked(
 ): Promise<RunResult> {
   const res = await run(cmd, args, options);
   if (res.code !== 0) {
-    const detail = (res.stderr.trim() || res.stdout.trim()).trim();
-    throw new Error(
-      `command failed (${res.code}): ${cmd}${args.length ? ` ${args.join(' ')}` : ''}` +
-        (detail ? `\n${detail}` : ''),
-    );
+    throw commandFailure(cmd, args, res);
   }
   return res;
 }

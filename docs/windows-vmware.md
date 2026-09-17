@@ -30,7 +30,7 @@ This is the VMware (Fusion) variant. It exists alongside the
 | Guest tools | VMware Tools (in-image) | virtio drivers |
 | Shared host folder | No (not supported for Win11 ARM on Apple silicon) | No |
 | Extra tools | Fusion only | qemu + swtpm |
-| Publish artifact | vmx + vmdk (tar.gz) | qcow2 |
+| Publish artifact | vmx + vmdk (chunked tar.gz) | qcow2 |
 
 Both images install the same Windows 11 Pro ARM64 guest and toolchain; pick
 either. Fusion is the better fit if you already use Fusion; QEMU needs no
@@ -73,13 +73,15 @@ npx agent-dev-env run windows-vmware
 
 or install the CLI globally (`npm install -g agent-dev-env`) and use
 `agent-dev-env run windows-vmware` everywhere below. On first use it picks
-the image archive: the local build output
+the image: the local build output
 (`~/Library/Application Support/agent-dev-env/build/windows-vmware/...`)
 when present, otherwise it asks to pull
 `sandbox-windows-11-arm64-vmware:latest` from GHCR via
-[oras](https://oras.land/) (one-time, ~20 GB — `brew install oras`). It
-then extracts the pristine VM (once; the cache is shared across
-instances) and clones a working VM per instance under
+[oras](https://oras.land/) (one-time, ~20 GB — `brew install oras`). The
+image arrives in 512 MiB chunks fetched one by one, so an interrupted
+pull keeps what it already downloaded and fetches only the missing
+chunks. It then extracts the pristine VM (once; the cache is shared
+across instances) and clones a working VM per instance under
 `~/Library/Application Support/agent-dev-env/windows-vmware/<image>/working/<instance>/`
 (the clone's display name in Fusion's library is the instance name —
 the base keeps the image's name) —
@@ -226,7 +228,9 @@ openchamber restart
 >   npx agent-dev-env run windows-vmware --reset
 > ```
 >
-> The archive must keep the layout the CLI extracts (the vmx and every
+> On first use the CLI splits the tarball into cached chunks next to it
+> (`….tar.gz.parts`) and reuses them until the tarball changes. The
+> archive must keep the layout the CLI extracts (the vmx and every
 > disk it references next to it — the same layout `deploy` publishes), so
 > pack the whole working directory. The `--reset` drops the current
 > working clone first; the CLI then extracts your golden as the new
@@ -532,8 +536,9 @@ boot, run, and wire up the sandbox. Everything it accepts — the full
 option list and the environment variable table — is in
 [the CLI reference](cli.md); notable defaults: image
 `sandbox-windows-11-arm64-vmware`, agent bridge port `4300`, Docker bridge
-port `4301`, `4` CPUs / 8 GB. A local archive can be pinned with
-`WINDOWS_VMWARE_IMAGE`; `FUSION_APP_PATH` overrides the Fusion location.
+port `4301`, `4` CPUs / 8 GB. A local image can be pinned with
+`WINDOWS_VMWARE_IMAGE` (a tar.gz or a chunked image directory);
+`FUSION_APP_PATH` overrides the Fusion location.
 `--work-dir` / `SANDBOX_WORK_DIR` are accepted but skipped with a warning
 (see [Shared host folder](#shared-host-folder)).
 

@@ -11,11 +11,6 @@ import { ensureVmwareImage, vmwareWorkingVmx } from './vmware-image.js';
 /** The platform id for the VMware path helpers. */
 const PLATFORM = 'ubuntu-vmware' as const;
 
-/** @internal — the pristine-archive identity (see vmware-image-archive.ts)
- *  — re-exported so the co-located test keeps its import path.
- */
-export { archiveIdentity } from './vmware-image-archive.js';
-
 /** The working clone's vmx. */
 export function ubuntuWorkingVmx(image: string, instance: string): string {
   return vmwareWorkingVmx(PLATFORM, image, instance);

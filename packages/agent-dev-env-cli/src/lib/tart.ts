@@ -9,6 +9,7 @@
 // raw results, the runners turn them into the legacy messages.
 
 import { commandExists, run, sleep, type RunOptions, type RunResult } from './exec.js';
+import { runCheckedWithRetries } from './retry.js';
 
 /** True when tart is on PATH (doctor/run preflight check). */
 export function tartAvailable(): boolean {
@@ -177,14 +178,27 @@ export function setVm(args: string[]): Promise<RunResult> {
   return run('tart', args);
 }
 
-/** Runs `tart pull` of a registry ref (GHCR).
+/** Attempts for `tart pull` (a dropped download resumes: tart keeps the
+ *  blobs it already fetched). */
+const PULL_ATTEMPTS = 3;
+const PULL_RETRY_DELAY_MS = 5_000;
+const PULL_RETRY_MAX_DELAY_MS = 60_000;
+
+/** Runs `tart pull` of a registry ref with bounded retries — the ~50 GB
+ *  one-time download must survive a dropped connection. An interrupted
+ *  pull is rethrown at once, never retried.
  *
  * @param registryRef - e.g. `ghcr.io/<owner>/<image>:latest`.
  * @param options - run() overrides (timeouts etc.).
- * @returns The raw result.
+ * @throws CommandFailedError when every attempt fails.
  */
-export function pullImage(registryRef: string, options: RunOptions = {}): Promise<RunResult> {
-  return run('tart', ['pull', registryRef], options);
+export async function pullImage(registryRef: string, options: RunOptions = {}): Promise<void> {
+  await runCheckedWithRetries('tart', ['pull', registryRef], options, {
+    label: `tart pull ${registryRef}`,
+    attempts: PULL_ATTEMPTS,
+    delayMs: PULL_RETRY_DELAY_MS,
+    maxDelayMs: PULL_RETRY_MAX_DELAY_MS,
+  });
 }
 
 /** Runs `tart stop` (graceful; tart force-stops after its own timeout).

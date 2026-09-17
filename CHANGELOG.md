@@ -13,6 +13,56 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- Image artifacts are now published and pulled as fixed-size 512 MiB
+  chunks (one OCI layer per chunk, media type
+  `application/vnd.agent-dev-env.image-part`) instead of one multi-GB
+  layer. GHCR's signed blob URL expires a few minutes after it is
+  issued, so the old 22 GiB single layer was systematically cut about a
+  third of the way through and every retry restarted from zero. The
+  chunked pull fetches each layer with `oras blob fetch`, keeps the
+  chunks already on disk and re-fetches only the missing or truncated
+  ones — an interrupted pull resumes at chunk granularity instead of
+  restarting the image. `deploy` splits the built archive before
+  pushing (VMware/Ubuntu: tar.gz, QEMU: qcow2; QEMU's staging chunks are
+  removed after a successful push) and records the chunk list in
+  `parts.json` next to them. The pristine-image identity is now the
+  pulled manifest digest (for locally packed images, a hash of the
+  chunk digests). Documented in AGENTS.md and docs/cli.md.
+- `UBUNTU_VMWARE_IMAGE` / `WINDOWS_VMWARE_IMAGE` now accept a chunked
+  image directory (`part-NNNN` files + `parts.json`) or a local tar.gz,
+  which is split into cached chunks next to it on first use; the
+  documented golden-image workflow is unchanged command-wise. A local
+  `WINDOWS_IMAGE` override still takes a qcow2.
+- Chunked transfers now retry transient failures with bounded
+  exponential backoff (`lib/retry.ts`): each `oras blob fetch` gets up
+  to four attempts, the manifest fetches three, and `oras push` /
+  `tart push` / `tart pull` three each. An expired signed URL or a
+  dropped connection costs one attempt, not the transfer, and completed
+  chunks stay on disk for the next run. A command interrupted by Ctrl+C
+  (SIGINT/SIGTERM, or the conventional 130/143 exits) is never retried.
+
+### Removed
+
+- Single-layer image manifest support: pulling an image published before
+  the chunked layout fails with an actionable error
+  (`rebuild the image and push it again with the chunked layout`).
+  Images must be re-deployed before the new CLI can pull them. A
+  leftover single-file VM cache is removed after the first successful
+  chunked pull.
+
+### Fixed
+
+- The large-image pull no longer fails with the misleading
+  `oras pull failed — check your network connection (public GHCR images
+  pull without a login)` error and no longer leaves a truncated cache
+  that later runs trust: chunk failures are reported with the failing
+  chunk, and the completed chunks are kept for the retry. `run` no
+  longer trusts a partially assembled QEMU disk — the pristine qcow2
+  carries a verified marker written only after the assembly size checks
+  out.
+
 ## [0.2.0] - 2026-09-17
 
 ### Added

@@ -26,12 +26,15 @@
 //     macos/<image>/               provenance records only (working/<instance>/
 //                                  clone.json + image.json — Tart owns the
 //                                  VM itself)
-//     windows-qemu/<image>/        image/ (pristine qcow2), working/<instance>/
-//                                  (overlay, efivars.fd, tpm/, pids, socks,
-//                                  clone.json) + image.json (provenance)
-//     windows-vmware/<image>/      image/, base/, working/<instance>/, clone.json
+//     windows-qemu/<image>/        image/ (assembled pristine qcow2 + the
+//                                  transient parts/ pull staging),
+//                                  working/<instance>/ (overlay, efivars.fd,
+//                                  tpm/, pids, socks, clone.json) + image.json
+//                                  (provenance)
+//     windows-vmware/<image>/      image/parts/ (the pulled chunked archive),
+//                                  base/, working/<instance>/, clone.json
 //                                  + image.json (provenance records)
-//     ubuntu-vmware/<image>/       image/, base/, working/<instance>/,
+//     ubuntu-vmware/<image>/       image/parts/, base/, working/<instance>/,
 //                                  clone.json + image.json (provenance records)
 //
 // The pristine image cache (image/ + base/) is shared across all instances:
@@ -130,16 +133,16 @@ export function imageRootDir(platform: Platform, image: string): string {
   return join(paths.data, platform, image);
 }
 
-/** <data>/<platform>/<image>/image/<image>.tar.gz — the cached VMware
- *  archive (the runner's pull cache; shared across instances; status/deploy
- *  read it too).
+/** <data>/<platform>/<image>/image/parts — the cached VMware archive
+ *  chunks (part-NNNN + parts.json; the runner's pull cache; shared
+ *  across instances; status/deploy read it too).
  *
  * @param platform - The platform id.
  * @param image - The image name.
- * @returns The cached archive path.
+ * @returns The cached parts directory.
  */
-export function vmwareArchivePath(platform: Platform, image: string): string {
-  return join(imageRootDir(platform, image), 'image', `${image}.tar.gz`);
+export function vmwarePartsDir(platform: Platform, image: string): string {
+  return join(imageRootDir(platform, image), 'image', 'parts');
 }
 
 /** <data>/<platform>/<image>/working — the per-instance working state dir

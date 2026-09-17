@@ -533,8 +533,10 @@ the foreground (with hard errors for missing prerequisites).
 ### Publishing
 
 The macOS images are pushed with `tart push`; the Windows images are plain
-files (qcow2 / vmx+vmdk tar.gz), so `deploy` pushes them to GHCR as OCI
-artifacts with `oras`:
+files (qcow2 / vmx+vmdk tar.gz), so `deploy` splits them into 512 MiB
+chunks and pushes them to GHCR as OCI artifacts with `oras` (one layer
+per chunk; the pull fetches chunks individually, so an interrupted pull
+only re-fetches the missing ones):
 
 ```bash
 # From the repository root; needs `brew install oras` and a GHCR token
@@ -544,10 +546,12 @@ pnpm agent-dev-env deploy sandbox-windows-11-arm64-vmware
 ```
 
 This pushes `ghcr.io/<owner>/<image>:<image_version>` and `:latest` for
-each. Consumers pull the file back by its name, e.g.
-`agent-dev-env run windows-qemu` runs `oras pull` into its state dir when
-no local build output exists (the VMware runner does the same for the
-tar.gz).
+each. Consumers pull the chunks into their state dir when no local build
+output exists — `agent-dev-env run windows-qemu` assembles the qcow2 from
+them (and deletes the chunks), the VMware runner extracts the tar.gz
+stream directly from the chunks. Both directions retry transient
+failures with bounded backoff (`lib/retry.ts`); an interrupted command
+(Ctrl+C) is never retried.
 
 ## Ubuntu images
 
@@ -655,7 +659,8 @@ per image lives in `~/Library/Application Support/agent-dev-env/build/ubuntu-vmw
 ### Publishing
 
 Same as the Windows VMware image: `deploy` packs the output directory into
-a tar.gz and pushes it to GHCR as an OCI artifact with `oras`:
+a tar.gz, splits it into 512 MiB chunks and pushes them to GHCR as an OCI
+artifact with `oras`:
 
 ```bash
 # From the repository root; needs `brew install oras` and a GHCR token
@@ -664,8 +669,8 @@ pnpm agent-dev-env deploy sandbox-ubuntu-24-04-arm64-vmware
 ```
 
 This pushes `ghcr.io/<owner>/<image>:<image_version>` and `:latest`.
-Consumers pull the file back by its name (`agent-dev-env run ubuntu-vmware`
-runs `oras pull` into its state dir when no local build output exists).
+Consumers pull the chunks into their state dir when no local build output
+exists (`agent-dev-env run ubuntu-vmware` extracts the chunks).
 
 ## Adding a new platform
 

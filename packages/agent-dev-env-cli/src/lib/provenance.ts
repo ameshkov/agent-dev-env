@@ -7,7 +7,8 @@
 //                (+ the resolved registry digest, best-effort) and when.
 //   clone.json - the working VM: what it was cloned from (tart clone /
 //                qcow2 overlay / vmx clone), when, and the pristine
-//                artifact identity (path|size|mtime) it was derived from.
+//                artifact identity it was derived from (the VMware
+//                chunk-set digest, or the qcow2 path|size|mtime).
 //
 // Together they answer "which image is this sandbox from" on any host
 // without booting the VM — the macOS backend has no other host footprint
@@ -41,7 +42,8 @@ interface CloneSourceInfo {
   registryRef?: string;
   /** The registry digest (best-effort, resolved at pull time). */
   digest?: string;
-  /** The pristine artifact identity (path|size|mtime, qcow2/vmx). */
+  /** The pristine artifact identity (the VMware chunk-set digest, or the
+   *  qcow2 path|size|mtime). */
   baseIdentity?: string;
 }
 
@@ -295,7 +297,8 @@ export async function resolveRegistryDigest(ref: string): Promise<string | undef
   return parseDescriptorDigest(res.stdout);
 }
 
-/** @internal — Parses the `oras manifest fetch --descriptor` JSON output.
+/** Parses the `oras manifest fetch --descriptor` JSON output (used by
+ *  the chunked pull to capture the manifest digest before downloading).
  * @param output - The raw stdout.
  * @returns The digest, or undefined when unparseable.
  */

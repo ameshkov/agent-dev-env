@@ -86,8 +86,9 @@ agent-dev-env/
 │   │   │   │                   #   backend (windows*.ts: image/guest/bridges/
 │   │   │   │                   #   autologon/reboot/shared/summary, via the
 │   │   │   │                   #   shared vmware-image.ts (clone/upgrade) +
-│   │   │   │                   #   vmware-image-archive.ts (archive pick/base)/
-│   │   │   │                   #   vmware-common.ts) and the
+│   │   │   │                   #   vmware-image-archive.ts (chunk pick/base)/
+│   │   │   │                   #   vmware-common.ts), the parts-pull.ts
+│   │   │   │                   #   chunked GHCR pull and the
 │   │   │   │                   #   Windows QEMU backend (windows-qemu.ts +
 │   │   │   │                   #   qemu-image.ts + windows-qemu-summary.ts via
 │   │   │   │                   #   the shared windows-bridges/windows-guest/
@@ -99,8 +100,12 @@ agent-dev-env/
 │   │   │   │                   #   ubuntu-copy.ts (ssh2) and windows.ts/
 │   │   │   │                   #   windows-copy.ts (psExec + SFTP, ssh2)
 │   │   │   ├── lib/            #   foundations: logger, prompt, vars, template,
-│   │   │   │                   #   ghcr, paths, exec, git, platform, vmrun,
-│   │   │   │                   #   tart, ssh, network, qemu, provenance, ...
+│   │   │   │                   #   ghcr, paths, exec, retry (backoff for
+│   │   │   │                   #   network transfers), git, platform, vmrun,
+│   │   │   │                   #   tart, ssh, network, qemu, provenance,
+│   │   │   │                   #   parts (chunked archives) + parts-manifest
+│   │   │   │                   #   (registry manifest parsing) +
+│   │   │   │                   #   vmware-archive (pack/split), ...
 │   │   │   └── **/*.test.ts    #   co-located unit tests
 │   │   ├── scripts/
 │   │   │   └── copy-assets.mjs #   build step: tsc + esbuild bundles +
@@ -587,6 +592,25 @@ operational incidents.
   the last instance or explicitly via `delete --pristine` (refused while
   another instance remains — a QEMU overlay is backed by the pristine
   qcow2).
+- **Chunked image archives**: the file-based images are published as
+  fixed-size 512 MiB chunks, one OCI layer per chunk
+  (`application/vnd.agent-dev-env.image-part`; `lib/parts.ts`). A single
+  22 GiB layer dies when GHCR's signed download URL expires mid-transfer;
+  chunks always fit the window, and a retry fetches only the missing or
+  truncated ones (never restart the whole image). No legacy single-layer
+  read support: a manifest without chunks is rejected with an actionable
+  error. The pull and push flows are `runners/parts-pull.ts` and the
+  parts-aware `lifecycle/deploy.ts`; the on-disk layout is
+  `part-NNNN` + `parts.json` per parts directory.
+- **Transfers retry with backoff**: every network transfer — chunk
+  fetches and pushes, the manifest fetches, `tart pull`/`tart push` —
+  runs through `lib/retry.ts` (`withRetries` /
+  `runCheckedWithRetries`) with bounded exponential backoff, so one
+  dropped connection or expired signed URL costs an attempt, not the
+  whole transfer. An interrupted command (SIGINT/SIGTERM, the
+  conventional 130/143 exits) is never retried: Ctrl+C must stop the
+  transfer, not restart it. Tests inject zero-delay sleeps through the
+  flows' `retry` option instead of waiting out the backoff.
 - **Releases**: the two version tracks (CLI + per-image
   `image_version`), their tags, changelogs, and the CI/npm rule are
   described in [Releases, Tags, and Changelogs](#releases-tags-and-changelogs).

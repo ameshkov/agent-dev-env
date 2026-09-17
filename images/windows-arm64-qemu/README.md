@@ -121,10 +121,10 @@ tag via `npx agent-dev-env tag <image>`.
   under QEMU + swtpm in a resizable window, forwards SSH/RDP/OpenChamber
   ports, and bridges the host's Docker engine and SSH agent into the
   guest (see [docs/windows-qemu.md](../../docs/windows-qemu.md)).
-- Publish: `npx agent-dev-env deploy sandbox-windows-11-arm64-qemu` pushes
-  the qcow2 to
+- Publish: `npx agent-dev-env deploy sandbox-windows-11-arm64-qemu` splits
+  the qcow2 into 512 MiB chunks and pushes them to
   `ghcr.io/<owner>/sandbox-windows-11-arm64-qemu:<version>` + `:latest` as
-  an OCI artifact via `oras` (the CLI pushes the qcow2 directly — no
+  an OCI artifact via `oras` (the CLI pushes the chunks directly — no
   platform wrapper — because `tart push` only works for Tart VMs). Needs
   `brew install oras` and a GHCR token with `write:packages`
   (`oras login ghcr.io`).
