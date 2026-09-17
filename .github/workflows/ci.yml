@@ -91,7 +91,7 @@ jobs:
         working-directory: packages/agent-dev-env-cli
         run: npm pack
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           body: See [CHANGELOG.md](./CHANGELOG.md) for the list of changes.

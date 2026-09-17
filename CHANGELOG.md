@@ -13,6 +13,13 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Fixed
+
+- The release workflow now uses `softprops/action-gh-release@v3` (v2
+  declares Node 20, which current runners force onto Node 24 and break
+  with `Error creating asset temp dir`, leaving a draft release without
+  the tarball asset).
+
 ## [0.4.0] - 2026-09-18
 
 ### Added
