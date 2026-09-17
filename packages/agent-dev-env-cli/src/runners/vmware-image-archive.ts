@@ -29,7 +29,7 @@ import {
   VMWARE_ARTIFACT_TYPE,
   type PartsRecord,
 } from '../lib/parts.js';
-import type { Platform } from '../lib/platform.js';
+import { PLATFORM_DEFAULTS, type Platform } from '../lib/platform.js';
 import { confirmDefault, type ConfirmOptions } from '../lib/prompt.js';
 import { writeImageRecord } from '../lib/provenance.js';
 import { ensureVmwareLocalParts, partsDirOf } from '../lib/vmware-archive.js';
@@ -220,7 +220,7 @@ async function pullImage(
   }
   const owner = await resolveOwner({ owner: context.options.owner, env: context.options.env });
   const ref = registryRef(context.image, 'latest', owner);
-  const hint = platform === 'windows-vmware' ? '~20 GB' : '~15 GB';
+  const hint = PLATFORM_DEFAULTS[platform].downloadHint;
   if (
     !(await confirmDefault(`Pull ${ref} (one-time, ${hint} download)?`, {
       default: 'y',

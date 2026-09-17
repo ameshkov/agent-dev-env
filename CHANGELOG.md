@@ -13,6 +13,14 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- The image-size estimates shown in pull prompts, the macOS
+  pristine-delete prompt, and the `doctor` disk check now match the
+  published images: one-time downloads of ~77 GB (macOS), ~25 GB
+  (Windows QEMU), ~23 GB (Windows VMware), and ~8.5 GB (Ubuntu VMware),
+  and the `doctor` build overhead reflects the ~70 GB macOS base image.
+
 ## [0.3.0] - 2026-09-17
 
 ### Changed

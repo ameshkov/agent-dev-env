@@ -40,7 +40,7 @@ build on every push to npm under the `canary` dist-tag:
 npm install -g agent-dev-env@canary
 ```
 
-On first use the CLI asks before pulling the image (one-time, ~50 GB for
+On first use the CLI asks before pulling the image (one-time, ~77 GB for
 macOS) and creating the working VM, then starts it with the recommended
 settings. Every guest gets the host's SSH agent and Docker engine bridged
 in; the macOS and Ubuntu guests additionally share your work directory and

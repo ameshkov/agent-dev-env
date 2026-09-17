@@ -62,7 +62,7 @@ instead of the default `/Volumes/dev`:
 npx agent-dev-env run macos --work-dir /path/to/your/workspace
 ```
 
-On first use it asks before pulling the image (~50 GB, one-time) and cloning
+On first use it asks before pulling the image (~77 GB, one-time) and cloning
 a working VM, then starts it in the background with the recommended settings
 (8 CPUs / 16 GB) and your work directory shared. When detected, it also
 bridges your SSH agent (see [docs/ssh-agent.md](ssh-agent.md)) and Docker
@@ -213,7 +213,7 @@ in an isolated sandbox, with your code safely on the host.
 
   This stops the sandbox first, then `tart delete`s the working VM — the
   next run re-clones it from the pristine image. Without `--pristine`, the
-  pristine image (~50 GB, re-pulled from GHCR on the next run) is kept when
+  pristine image (~77 GB, re-pulled from GHCR on the next run) is kept when
   deleting interactively — press `y` at the prompt or pass `--pristine` /
   `--yes` to delete it too. Options are the same `SANDBOX_VM` /
   `SANDBOX_IMAGE` overrides as `run`.

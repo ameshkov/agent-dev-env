@@ -332,10 +332,11 @@ repository — without one it errors clearly.
 ## doctor
 
 Prerequisite + disk check: host macOS, Apple Silicon, free disk (against
-the images' `disk_size` vars plus the ~50 GB base image), and per-platform
-tooling (tart, packer, qemu/qemu-img/swtpm, vmrun, oras) with install
-hints. `--platform <platform>` narrows the check to one platform
-(without it, all platforms).
+the images' `disk_size` vars plus the build overhead — the ~70 GB macOS
+base image, ~50 GB for the file-based builds), and per-platform tooling
+(tart, packer, qemu/qemu-img/swtpm, vmrun, oras) with install hints.
+`--platform <platform>` narrows the check to one platform (without it, all
+platforms).
 
 ## watch-build
 

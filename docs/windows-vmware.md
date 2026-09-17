@@ -44,8 +44,8 @@ extra VMware install.
   on Intel, so this sandbox is ARM64-only.
 - [VMware Fusion](https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion)
   (free for personal use; the image is built against Fusion 13.6+).
-- ~40 GB of free disk space (the image is ~20 GB, the working clone grows on
-  top).
+- ~70 GB of free disk space (the image is ~23 GB, the extracted base and
+  the working clone need room on top).
 
 ### Default account
 
@@ -77,7 +77,7 @@ the image: the local build output
 (`~/Library/Application Support/agent-dev-env/build/windows-vmware/...`)
 when present, otherwise it asks to pull
 `sandbox-windows-11-arm64-vmware:latest` from GHCR via
-[oras](https://oras.land/) (one-time, ~20 GB — `brew install oras`). The
+[oras](https://oras.land/) (one-time, ~23 GB — `brew install oras`). The
 image arrives in 512 MiB chunks fetched one by one, so an interrupted
 pull keeps what it already downloaded and fetches only the missing
 chunks. It then extracts the pristine VM (once; the cache is shared

@@ -42,7 +42,7 @@ npx agent-dev-env build
 ```
 
 `agent-dev-env` is the CLI shipped by this repo (see
-[docs/cli.md](../../docs/cli.md)). The first build pulls the ~50 GB base
+[docs/cli.md](../../docs/cli.md)). The first build pulls the ~70 GB base
 image (`ghcr.io/cirruslabs/macos-tahoe-xcode:26.5`) and takes a while.
 Note that the builder fails if a VM with the same name already exists —
 remove it first with `tart delete <image-name>`.

@@ -1,7 +1,8 @@
 // commands/doctor.ts — `agent-dev-env doctor [--platform P]`: prereq table
 // with install hints and a free-disk estimate (against the vars files'
-// disk_size + the ~50 GB base image for macOS builds). Supersedes the
-// scattered require_cmd blocks; read-only.
+// disk_size plus the build overhead — the ~70 GB macOS base image or the
+// file-based builds' staging). Supersedes the scattered require_cmd
+// blocks; read-only.
 //
 // Exit code: 1 when any required check fails, 0 otherwise. Optional
 // (bridge/build-only) tooling is reported as such and does not fail the
@@ -26,8 +27,17 @@ interface Check {
   hint: string;
 }
 
-/** Overhead for the macOS base image (~50 GB, pulled for the build). */
-const BASE_IMAGE_GB = 50;
+/** The free-disk overhead a build needs beyond the VM's `disk_size` and
+ *  what it covers (the doctor hint): the macOS build pulls the ~70 GB
+ *  Cirrus base image, the file-based builds stage the ISO + their
+ *  intermediate artifacts.
+ *
+ * @param platform - The platform to size.
+ * @returns The overhead in GB and the hint note.
+ */
+function buildOverhead(platform: Platform): { gb: number; note: string } {
+  return platform === 'macos' ? { gb: 70, note: 'base image' } : { gb: 50, note: 'build overhead' };
+}
 
 /** Runs the prerequisite + free-disk check for one or all platforms.
  *
@@ -86,6 +96,7 @@ async function checksFor(platform: Platform): Promise<Check[]> {
 /** Checks shared by every platform: host, arch, free disk. */
 function hostChecks(platform: Platform): Check[] {
   const needed = diskNeededGb(platform);
+  const overhead = buildOverhead(platform);
   const free = freeDiskGb();
   return [
     {
@@ -108,7 +119,7 @@ function hostChecks(platform: Platform): Check[] {
         free === undefined
           ? 'could not determine free disk'
           : `free ${free.toFixed(0)} GB vs ${needed.toFixed(0)} GB needed ` +
-            `(disk_size + ~${BASE_IMAGE_GB} GB base image)`,
+            `(disk_size + ~${overhead.gb} GB ${overhead.note})`,
     },
   ];
 }
@@ -165,8 +176,7 @@ function vmwareChecks(): Check[] {
   ];
 }
 
-/** Largest disk_size among the platform's images + the base-image
- *  overhead. */
+/** Largest disk_size among the platform's images + the build overhead. */
 function diskNeededGb(platform: Platform): number {
   let maxSize = 0;
   try {
@@ -178,7 +188,7 @@ function diskNeededGb(platform: Platform): number {
   } catch {
     // no image in the catalog — fall back to the default estimate
   }
-  return (maxSize || 100) + BASE_IMAGE_GB;
+  return (maxSize || 100) + buildOverhead(platform).gb;
 }
 
 function freeDiskGb(): number | undefined {

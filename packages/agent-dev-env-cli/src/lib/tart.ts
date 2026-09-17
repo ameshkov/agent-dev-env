@@ -184,7 +184,7 @@ const PULL_ATTEMPTS = 3;
 const PULL_RETRY_DELAY_MS = 5_000;
 const PULL_RETRY_MAX_DELAY_MS = 60_000;
 
-/** Runs `tart pull` of a registry ref with bounded retries — the ~50 GB
+/** Runs `tart pull` of a registry ref with bounded retries — the ~77 GB
  *  one-time download must survive a dropped connection. An interrupted
  *  pull is rethrown at once, never retried.
  *

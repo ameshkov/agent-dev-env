@@ -13,7 +13,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { run } from '../lib/exec.js';
 import { logger } from '../lib/logger.js';
 import { imageRootDir, instanceDir, listInstances } from '../lib/paths.js';
-import type { Platform } from '../lib/platform.js';
+import { PLATFORM_DEFAULTS, type Platform } from '../lib/platform.js';
 import { qemuWorkingDir } from '../lib/qemu.js';
 import { clearCloneRecord, clearImageRecord } from '../lib/provenance.js';
 import { deleteVm, stopVm, tartAvailable, vmExists, vmState } from '../lib/tart.js';
@@ -329,8 +329,8 @@ export async function dirSizeHuman(dir: string): Promise<string> {
 /** The pristine-image deletion — always opt-in (never implied). */
 async function maybeDeletePristine(image: string, yes: boolean, pristine: boolean): Promise<void> {
   const ask =
-    `Also delete the pristine image '${image}' (frees ~50 GB; re-pulled from ` +
-    'GHCR on the next run)?';
+    `Also delete the pristine image '${image}' ` +
+    `(frees ${PLATFORM_DEFAULTS.macos.downloadHint}; re-pulled from GHCR on the next run)?`;
   if (!pristine && !(yes || (await confirm(ask, { default: 'n' })))) {
     logger.info(`Kept the pristine image '${image}'.`);
     return;

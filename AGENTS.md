@@ -256,7 +256,7 @@ works: DEVELOPMENT.md.
 
 Outputs go under `<data>/build/<platform>/` — except macOS, where the
 `tart` builder leaves the VM in the Tart store (`~/.tart/vms/`). The
-first macOS build pulls a ~50 GB base image. `agent-dev-env doctor`
+first macOS build pulls a ~70 GB base image. `agent-dev-env doctor`
 performs the whole prerequisite and disk check.
 
 ## Releases, Tags, and Changelogs

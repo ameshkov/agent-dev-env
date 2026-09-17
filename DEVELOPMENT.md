@@ -48,7 +48,7 @@ Everything a developer needs, at a glance:
 | VMware Fusion 13.6+ + Packer | Windows/Ubuntu VMware image builds | Fusion (free for personal use) + `brew install hashicorp/tap/packer` |
 | oras | GHCR pull/push of the file-based images | `brew install oras` |
 | vncdotool + Swift compiler | VNC build watchdog | `pip3 install vncdotool` (+ Xcode CLT above) |
-| ~150 GB free disk | macOS build (base image ~50 GB); ~100 GB for others | — |
+| ~230 GB free disk | macOS build (base image ~70 GB + 160 GB disk); ~150 GB for others | — |
 
 ### Bring-your-own files
 
@@ -263,7 +263,7 @@ Without an argument, `agent-dev-env build` builds every image in
 Notes:
 
 - Prerequisites: see the table above (Apple Silicon + Tart + Packer).
-- The first build pulls the ~50 GB base image — be patient.
+- The first build pulls the ~70 GB base image — be patient.
 - The builder **fails if a VM with the same name already exists** (Packer
   leaves the VM in `~/.tart/vms/`). Delete it first:
   `tart delete sandbox-macos-tahoe`.

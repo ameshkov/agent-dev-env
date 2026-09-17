@@ -24,6 +24,7 @@ import { registryRef, resolveOwner } from '../lib/ghcr.js';
 import { logger } from '../lib/logger.js';
 import { buildDir } from '../lib/paths.js';
 import { createPartsReadStream, partsIdentity, type PartsRecord } from '../lib/parts.js';
+import { PLATFORM_DEFAULTS } from '../lib/platform.js';
 import { confirmDefault } from '../lib/prompt.js';
 import { clearCloneRecord, recordClone, writeImageRecord } from '../lib/provenance.js';
 import {
@@ -103,8 +104,9 @@ async function pullQemuImage(context: RunContext, cached: string): Promise<strin
   }
   const owner = await resolveOwner({ owner: context.options.owner, env: context.options.env });
   const ref = registryRef(context.image, 'latest', owner);
+  const hint = PLATFORM_DEFAULTS[context.platform].downloadHint;
   if (
-    !(await confirmDefault(`Pull ${ref} (one-time, ~14 GB download)?`, {
+    !(await confirmDefault(`Pull ${ref} (one-time, ${hint} download)?`, {
       default: 'y',
       yes: context.options.yes,
     }))
@@ -115,7 +117,7 @@ async function pullQemuImage(context: RunContext, cached: string): Promise<strin
   }
   const partsDir = qemuPartsDir(context.image);
   mkdirSync(dirname(cached), { recursive: true });
-  logger.info(`Pulling ${ref} (one-time, ~14 GB download in 512 MiB chunks)...`);
+  logger.info(`Pulling ${ref} (one-time, ${hint} download in 512 MiB chunks)...`);
   const record = await pullQemuChunks(ref, partsDir);
   try {
     await assembleQemuImage(partsDir, record, cached);

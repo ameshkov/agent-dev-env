@@ -39,7 +39,8 @@ export interface PlatformDefaults {
   supportsSettings: boolean;
   supportsSync: boolean;
   supportsPristineDelete: boolean;
-  /** One-time download hint for pull prompts. */
+  /** One-time download hint for pull prompts (the sum of the image's OCI
+   *  layer sizes on GHCR; refresh it when the image version bumps). */
   downloadHint: string;
 }
 
@@ -58,7 +59,7 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
     supportsSettings: true,
     supportsSync: true,
     supportsPristineDelete: true,
-    downloadHint: '~50 GB',
+    downloadHint: '~77 GB',
   },
   'windows-qemu': {
     image: 'sandbox-windows-11-arm64-qemu',
@@ -75,7 +76,7 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
     supportsSettings: true,
     supportsSync: true,
     supportsPristineDelete: false,
-    downloadHint: '~14 GB',
+    downloadHint: '~25 GB',
   },
   'windows-vmware': {
     image: 'sandbox-windows-11-arm64-vmware',
@@ -89,7 +90,7 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
     supportsSettings: true,
     supportsSync: true,
     supportsPristineDelete: false,
-    downloadHint: '~20 GB',
+    downloadHint: '~23 GB',
   },
   'ubuntu-vmware': {
     image: 'sandbox-ubuntu-24-04-arm64-vmware',
@@ -103,7 +104,7 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
     supportsSettings: true,
     supportsSync: true,
     supportsPristineDelete: false,
-    downloadHint: '~15 GB',
+    downloadHint: '~8.5 GB',
   },
 };
 

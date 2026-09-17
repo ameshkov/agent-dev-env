@@ -30,7 +30,7 @@
   HVF, and HVF can only virtualize ARM64 guests — this sandbox is ARM64-only.
 - [QEMU](https://www.qemu.org/) and [swtpm](https://github.com/stefanberger/swtpm)
   (the virtual TPM 2.0 — Windows 11 requires one).
-- ~30 GB of free disk space (the image is ~14 GB, the working VM grows on
+- ~40 GB of free disk space (the image is ~25 GB, the working VM grows on
   top).
 
 ### Default account
@@ -66,7 +66,7 @@ the disk image: the local build output
 (`~/Library/Application Support/agent-dev-env/build/windows-qemu/...`)
 when present, otherwise it asks to pull
 `sandbox-windows-11-arm64-qemu:latest` from GHCR via
-[oras](https://oras.land/) (one-time, ~14 GB — `brew install oras`). The
+[oras](https://oras.land/) (one-time, ~25 GB — `brew install oras`). The
 image arrives in 512 MiB chunks fetched one by one; an interrupted pull
 keeps what it already downloaded, and the working disk is assembled from
 the chunks (they are removed once it is complete). It then creates a

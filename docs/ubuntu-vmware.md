@@ -45,8 +45,8 @@ Windows/macOS overhead; see the [macOS guide](macos.md),
   on Intel, so this sandbox is ARM64-only.
 - [VMware Fusion](https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion)
   (free for personal use; the image is built against Fusion 13.6+).
-- ~35 GB of free disk space (the image is ~15 GB, the working clone grows on
-  top).
+- ~35 GB of free disk space (the image is ~8.5 GB, the working clone grows
+  on top).
 
 ### Default account
 
@@ -78,7 +78,7 @@ the image: the local build output
 (`~/Library/Application Support/agent-dev-env/build/ubuntu-vmware/...`)
 when present, otherwise it asks to pull
 `sandbox-ubuntu-24-04-arm64-vmware:latest` from GHCR via
-[oras](https://oras.land/) (one-time, ~15 GB — `brew install oras`). The
+[oras](https://oras.land/) (one-time, ~8.5 GB — `brew install oras`). The
 image arrives in 512 MiB chunks fetched one by one, so an interrupted
 pull keeps what it already downloaded and fetches only the missing
 chunks. It then extracts the pristine VM (once; the cache is shared
