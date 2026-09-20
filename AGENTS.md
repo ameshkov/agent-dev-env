@@ -102,7 +102,8 @@ agent-dev-env/
 │   │   │   ├── lib/            #   foundations: logger, prompt, vars, template,
 │   │   │   │                   #   ghcr, paths, exec, retry (backoff for
 │   │   │   │                   #   network transfers), git, platform, vmrun,
-│   │   │   │                   #   tart, ssh, network, qemu, provenance,
+│   │   │   │                   #   tart, ssh, network, qemu, image-size
+│   │   │   │                   #   (local/GHCR image sizing), provenance,
 │   │   │   │                   #   parts (chunked archives) + parts-manifest
 │   │   │   │                   #   (registry manifest parsing) +
 │   │   │   │                   #   vmware-archive (pack/split), ...
@@ -664,6 +665,11 @@ operational incidents.
   window (`runners/windows-reboot.ts`).
 - **Guest markers**: guest-side state markers live under
   `~/.config/agent-dev-env/` (green-field policy; no legacy paths).
+- **Real image sizes**: the `doctor` free-disk check MUST use the real
+  number — the measured local footprint for a pulled image (VMware
+  chunks + extracted base, QEMU pristine qcow2, Tart VM), otherwise the
+  GHCR manifest's layer sum — never the vars files' virtual `disk_size`
+  or a hardcoded estimate (`lib/image-size.ts`).
 - **Image provenance**: every image must answer "which image is this
   sandbox from" without forensics. The guest records its identity in
   `~/.config/agent-dev-env/image.json` (baked by the Packer templates:

@@ -4,6 +4,7 @@ import {
   gatewayFromVmIp,
   guestAgentKickstartCommand,
   parseTartList,
+  parseTartListJson,
   tartRunArgs,
   tartSetArgs,
 } from './tart.js';
@@ -30,6 +31,50 @@ describe('parseTartList', () => {
 
   it('returns an empty map for empty output', () => {
     expect(parseTartList('').size).toBe(0);
+  });
+});
+
+// `tart list --format json` rows (Tart 2.32.x): Size is the on-disk size
+// in decimal GB, Disk the virtual disk size.
+const LIST_JSON = JSON.stringify([
+  {
+    Source: 'local',
+    Name: 'sandbox-macos-tahoe',
+    Disk: 160,
+    Size: 102,
+    State: 'stopped',
+    Running: false,
+    Accessed: '2026-09-11T16:50:09Z',
+  },
+  {
+    Source: 'OCI',
+    Name: 'ghcr.io/ameshkov/sandbox-macos-tahoe:latest',
+    Disk: 140,
+    Size: 87,
+    State: 'stopped',
+    Running: false,
+    Accessed: '2026-09-11T16:50:09Z',
+  },
+]);
+
+describe('parseTartListJson', () => {
+  it('maps VM names to on-disk sizes in bytes', () => {
+    const sizes = parseTartListJson(LIST_JSON);
+    expect(sizes.get('sandbox-macos-tahoe')).toBe(102e9);
+    expect(sizes.get('ghcr.io/ameshkov/sandbox-macos-tahoe:latest')).toBe(87e9);
+    expect(sizes.size).toBe(2);
+  });
+
+  it('skips rows without a usable name/size', () => {
+    const sizes = parseTartListJson(
+      JSON.stringify([{ Name: 'no-size' }, { Size: 5 }, { Name: 'zero', Size: 0 }]),
+    );
+    expect(sizes.size).toBe(0);
+  });
+
+  it('returns an empty map for unreadable output', () => {
+    expect(parseTartListJson('not json').size).toBe(0);
+    expect(parseTartListJson('{"Name":"x"}').size).toBe(0);
   });
 });
 

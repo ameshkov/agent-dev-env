@@ -13,6 +13,17 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- The `doctor` free-disk check no longer sizes itself from the vars
+  files' virtual `disk_size` plus a hardcoded build overhead (230 GB for
+  macOS, 150 GB for the others). It now uses the real image: the
+  measured footprint when the image is already pulled (the VMware chunks
+  and the extracted base, the QEMU pristine qcow2, the Tart VM), or the
+  published GHCR download size (the sum of the manifest's layer sizes)
+  when it is not. An image size that cannot be determined (offline,
+  `oras` missing) is reported as `unknown` instead of failing the check.
+
 ### Fixed
 
 - The release workflow now uses `softprops/action-gh-release@v3` (v2

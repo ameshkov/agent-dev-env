@@ -145,6 +145,18 @@ export function vmwarePartsDir(platform: Platform, image: string): string {
   return join(imageRootDir(platform, image), 'image', 'parts');
 }
 
+/** <data>/<platform>/<image>/base — the extracted pristine VM directory
+ *  the VMware backends clone their working VMs from (identity-gated by
+ *  the base-archive marker).
+ *
+ * @param platform - The platform id.
+ * @param image - The image name.
+ * @returns The extracted base directory.
+ */
+export function vmwareBaseDir(platform: Platform, image: string): string {
+  return join(imageRootDir(platform, image), 'base');
+}
+
 /** <data>/<platform>/<image>/working — the per-instance working state dir
  *  (one subdir per sandbox instance).
  *

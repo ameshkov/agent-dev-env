@@ -339,10 +339,14 @@ repository — without one it errors clearly.
 
 ## doctor
 
-Prerequisite + disk check: host macOS, Apple Silicon, free disk (against
-the images' `disk_size` vars plus the build overhead — the ~70 GB macOS
-base image, ~50 GB for the file-based builds), and per-platform tooling
-(tart, packer, qemu/qemu-img/swtpm, vmrun, oras) with install hints.
+Prerequisite + disk check: host macOS, Apple Silicon, free disk, and
+per-platform tooling (tart, qemu/qemu-img/swtpm, vmrun, oras) with
+install hints. The free-disk check uses the real image size, never the
+vars files' virtual `disk_size`: the measured on-disk footprint when the
+image is already pulled (the VMware chunks + extracted base, the QEMU
+pristine qcow2, the Tart VM), otherwise the published GHCR download size
+(the manifest's layer sum). A size that cannot be determined (offline,
+`oras` missing) is reported as `unknown` and does not fail the check.
 `--platform <platform>` narrows the check to one platform (without it, all
 platforms).
 

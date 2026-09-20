@@ -16,7 +16,13 @@ import { join } from 'node:path';
 import { commandExists, run } from '../lib/exec.js';
 import { registryRef, resolveOwner } from '../lib/ghcr.js';
 import { logger } from '../lib/logger.js';
-import { buildDir, imageRootDir, listInstances, vmwarePartsDir } from '../lib/paths.js';
+import {
+  buildDir,
+  imageRootDir,
+  listInstances,
+  vmwareBaseDir,
+  vmwarePartsDir,
+} from '../lib/paths.js';
 import {
   assertPartsComplete,
   createPartsReadStream,
@@ -36,11 +42,6 @@ import { ensureVmwareLocalParts, partsDirOf } from '../lib/vmware-archive.js';
 import type { RunContext } from './framework.js';
 import { pullImageParts } from './parts-pull.js';
 
-/** The base directory of the pristine extraction. */
-function baseDir(platform: Platform, image: string): string {
-  return join(imageRootDir(platform, image), 'base');
-}
-
 /** The pristine base vmx (the clone source).
  *
  * @param platform - The target platform.
@@ -48,7 +49,7 @@ function baseDir(platform: Platform, image: string): string {
  * @returns The base vmx path.
  */
 export function baseVmx(platform: Platform, image: string): string {
-  return join(baseDir(platform, image), `${image}.vmx`);
+  return join(vmwareBaseDir(platform, image), `${image}.vmx`);
 }
 
 /** The archive identity marker path. */
@@ -101,7 +102,7 @@ function missingBaseDisks(baseDirPath: string, baseVmxPath: string): string[] {
  * @param image - The image name.
  */
 function dropBaseState(platform: Platform, image: string): void {
-  rmSync(baseDir(platform, image), { recursive: true, force: true });
+  rmSync(vmwareBaseDir(platform, image), { recursive: true, force: true });
   rmSync(join(imageRootDir(platform, image), 'working'), { recursive: true, force: true });
 }
 
@@ -343,7 +344,7 @@ async function ensureBase(
 ): Promise<void> {
   const image = context.image;
   const markerPath = baseMarker(platform, image);
-  const baseDirPath = baseDir(platform, image);
+  const baseDirPath = vmwareBaseDir(platform, image);
   const baseVmxPath = baseVmx(platform, image);
   const id = partsIdentity(requirePartsRecord(partsDir));
 
@@ -399,7 +400,7 @@ async function extractBase(
   partsDir: string,
   id: string,
 ): Promise<void> {
-  const baseDirPath = baseDir(platform, image);
+  const baseDirPath = vmwareBaseDir(platform, image);
   const baseVmxPath = baseVmx(platform, image);
   const record = requirePartsRecord(partsDir);
   logger.cmd(`tar -xzf - -C ${baseDirPath} (${record.parts.length} chunks from ${partsDir})`);

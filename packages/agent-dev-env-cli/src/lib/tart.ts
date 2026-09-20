@@ -50,6 +50,47 @@ export async function listVms(): Promise<Map<string, string>> {
   return res.code === 0 ? parseTartList(res.stdout) : new Map();
 }
 
+/** @internal — Parses `tart list --format json` into VM name → on-disk
+ *  size in bytes. Tart reports the size in decimal GB (the `Size`
+ *  column), which is what the host actually holds; the OCI reference is
+ *  the key for images staged by `tart pull`. Exported for the co-located
+ *  unit tests; callers use listVmSizes().
+ *
+ * @param output - The raw stdout of `tart list --format json`.
+ * @returns Map of VM name → size in bytes (unreadable rows are skipped).
+ */
+export function parseTartListJson(output: string): Map<string, number> {
+  const sizes = new Map<string, number>();
+  let rows: unknown;
+  try {
+    rows = JSON.parse(output);
+  } catch {
+    return sizes;
+  }
+  if (!Array.isArray(rows)) {
+    return sizes;
+  }
+  for (const row of rows) {
+    const entry = typeof row === 'object' && row !== null ? (row as Record<string, unknown>) : {};
+    const name = entry.Name;
+    const size = entry.Size;
+    if (typeof name === 'string' && typeof size === 'number' && size > 0) {
+      sizes.set(name, size * 1e9);
+    }
+  }
+  return sizes;
+}
+
+/** The on-disk size of every VM in the tart store, keyed by name (the
+ *  OCI reference for images staged by `tart pull`).
+ *
+ * @returns Map of VM name → size in bytes (empty when tart cannot list).
+ */
+export async function listVmSizes(): Promise<Map<string, number>> {
+  const res = await run('tart', ['list', '--format', 'json']);
+  return res.code === 0 ? parseTartListJson(res.stdout) : new Map();
+}
+
 /** Whether a VM by this name exists in the tart store.
  *
  * @param name - The VM/image name.
