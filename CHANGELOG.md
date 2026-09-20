@@ -13,6 +13,8 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-20
+
 ### Changed
 
 - The `doctor` free-disk check no longer sizes itself from the vars
@@ -209,7 +211,8 @@ never removed — changes land there until the next release.
   repo with `-C` stay on the target repo even when the CLI itself runs
   inside a git hook.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.4.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.5.0...HEAD
+[0.5.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.5.0
 [0.4.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.4.0
 [0.3.1]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.3.1
 [0.3.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.3.0
