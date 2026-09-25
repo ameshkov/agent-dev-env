@@ -1,6 +1,6 @@
 {
   "name": "agent-dev-env",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Sandbox VM runner and image lifecycle CLI for developer agent sandboxes (macOS, Windows, Ubuntu image recipes).",
   "license": "MIT",
   "author": "Andrey Meshkov <am@adguard.com>",
