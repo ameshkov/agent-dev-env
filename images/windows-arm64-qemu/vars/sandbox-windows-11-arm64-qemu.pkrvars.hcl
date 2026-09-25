@@ -84,10 +84,11 @@ jdk_version = "21.0.12.1"
 jdk_sha256 = "ccf2e51f527d542a70ba5794a600d3aac04b4e967950e227834c7566cb1bec7b"
 ninja_version = "1.13.2"
 
-# OpenChamber desktop app (win-arm64 NSIS installer from the GitHub
-# releases, hash-pinned) — parity with the mac cask and the Ubuntu AppImage.
-openchamber_desktop_version = "1.22.0"
-openchamber_desktop_sha256 = "6c49e9a6fdd6a2b6f4e4618f3eb83ab46b4b0e667b04668ac1ac9890622941f3"
+# OpenChamber desktop app 2.0.0 — the OpenCode V2-compatible release
+# (win-arm64 NSIS installer from the GitHub releases, hash-pinned) —
+# parity with the mac cask and the Ubuntu AppImage.
+openchamber_desktop_version = "2.0.0"
+openchamber_desktop_sha256 = "a8280d2f09fa784a64c5d88007c2dea82bf36bc9d313de1158610252a556d367"
 
 # OpenChamber web UI password + port. The runner forwards guest 4000 to
 # host 127.0.0.1:4000, so the UI is reachable at http://127.0.0.1:4000
@@ -100,4 +101,4 @@ openchamber_port = 4000
 # besides :latest). For every release: bump it, add a CHANGELOG.md entry,
 # and create the windows-arm64-qemu-v<version> git tag
 # (npx agent-dev-env tag <image>).
-image_version = "2.0.0"
+image_version = "2.1.0"

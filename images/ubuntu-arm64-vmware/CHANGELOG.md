@@ -13,6 +13,20 @@ the next release.
 
 ## [Unreleased]
 
+## [ubuntu-arm64-vmware-v2.1.0] - 2026-09-25
+
+### Changed
+
+- OpenCode is now V2, installed from the official V2 installer
+  (`curl -fsSL https://opencode.ai/v2/install | bash`; the plain
+  `/install` URL still serves V1). The OpenChamber web UI moves to the
+  2.x line — the release compatible with OpenCode V2 — and the desktop
+  app is pinned to 2.0.0 (linux-arm64 AppImage, new SHA256).
+- The user-settings copy now includes the OpenCode V2 terminal config
+  (`~/.config/opencode/cli.json`), so the guest's terminal preferences
+  match the host's. The settings version was bumped so existing guests
+  are offered the re-copy once.
+
 ## [ubuntu-arm64-vmware-v2.0.0] - 2026-09-17
 
 ### Changed
@@ -222,7 +236,8 @@ the next release.
   `DEVELOPMENT.md` and `AGENTS.md` list the new platform and the
   shared `scripts/lib/vmware.sh` helper.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/ubuntu-arm64-vmware-v2.0.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/ubuntu-arm64-vmware-v2.1.0...HEAD
+[ubuntu-arm64-vmware-v2.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/ubuntu-arm64-vmware-v2.1.0
 [ubuntu-arm64-vmware-v2.0.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/ubuntu-arm64-vmware-v2.0.0
 [ubuntu-arm64-vmware-v1.2.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/ubuntu-arm64-vmware-v1.2.0
 [ubuntu-arm64-vmware-v1.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/ubuntu-arm64-vmware-v1.1.0

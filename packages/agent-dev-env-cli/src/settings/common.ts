@@ -1,10 +1,12 @@
 // settings/common.ts — the parts of the user-settings copy shared by the
-// macOS and Ubuntu backends: the outcome enum, the guest marker paths
-// (green-field ~/.config/agent-dev-env/), the host candidate file set
-// (identical on both — the host is always macOS), the .gitconfig
-// sanitization and the guest-side marker scripts. The per-platform bits
-// live in settings/macos.ts (version 10, /Users/admin, tart transport)
-// and settings/ubuntu.ts (version 4, /home/admin, ssh2 transport).
+// macOS, Ubuntu and Windows backends: the outcome enum, the guest marker
+// paths (green-field ~/.config/agent-dev-env/), the host candidate file
+// set (identical on all backends — the host is always macOS), the
+// .gitconfig sanitization and the guest-side marker scripts. The
+// per-platform bits live in settings/macos.ts (version 12, /Users/admin,
+// tart transport), settings/ubuntu.ts (version 6, /home/admin, ssh2
+// transport) and settings/windows.ts (version 3, C:/Users/<user>,
+// psExec + SFTP).
 
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -25,8 +27,14 @@ const SETTINGS_MARKER_DIR = SETTINGS_MARKER.split('/').slice(0, -1).join('/');
 /** The candidate settings paths, relative to $HOME — the same list as
  *  the shell's collect_settings_files (directories are copied whole). */
 const SETTINGS_CANDIDATES = [
+  // Cross-agent personal settings: the shared skills directory
+  // (`~/.agents/skills/`) and the installer's lockfile — OpenCode,
+  // Copilot and Codex all read this directory.
+  '.agents',
   '.config/opencode/opencode.json',
   '.config/opencode/opencode.jsonc',
+  // OpenCode V2 terminal config; tui.json is its V1 predecessor.
+  '.config/opencode/cli.json',
   '.config/opencode/tui.json',
   '.config/opencode/tui.jsonc',
   '.config/opencode/agents',

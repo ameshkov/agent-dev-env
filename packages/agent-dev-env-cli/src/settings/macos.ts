@@ -19,11 +19,11 @@ export {
 
 /** Version of the settings copy. Bump when the file set or the copy logic
  *  changes: guests whose marker is older are offered the copy again.
- *  Version 10 adds the OPENCODE_MODELS_URL write (see
- *  openCodeModelsUrlScript) — existing guests get the copy offered again
- *  so the variable reaches sandboxes copied by an older CLI.
+ *  Version 12 adds the cross-agent personal settings directory
+ *  (`~/.agents`) to the copied file set — existing guests get the copy
+ *  offered again so it reaches sandboxes copied by an older CLI.
  */
-export const SETTINGS_VERSION = 10;
+export const SETTINGS_VERSION = 12;
 
 /** The sandbox user in the macOS base image — fixed, so host home paths
  *  are rewritten to it when the settings are copied (see sanitize).

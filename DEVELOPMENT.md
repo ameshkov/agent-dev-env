@@ -233,7 +233,8 @@ pristine image is deleted (`--pristine`).
    - Google Chrome and Mozilla Firefox (latest stable universal macOS
      builds, via Homebrew casks; quarantine is stripped with `xattr` so they
      launch without Gatekeeper prompts);
-   - OpenCode (`brew install anomalyco/tap/opencode`);
+   - OpenCode V2 (`brew install anomalyco/tap/opencode-v2` — the tap's
+     plain `opencode` formula still installs V1);
    - OpenCodeReview (`npm install -g @alibaba-group/open-code-review`) — the
      `ocr` AI code review CLI; its global config
      (`~/.opencodereview/config.json`) is synced from the host with the user
@@ -241,7 +242,8 @@ pristine image is deleted (`--pristine`).
    - OpenChamber desktop app (`brew install --cask openchamber`) — the
      native macOS app for the guest desktop; quarantine stripped so it
      launches without Gatekeeper prompts;
-   - OpenChamber (`npm install -g @openchamber/web`) — web UI for OpenCode;
+   - OpenChamber (`npm install -g @openchamber/web`) — the 2.x web UI for
+     OpenCode V2;
      installed as a login service (LaunchAgent) listening on `0.0.0.0:4000`,
      reachable from the host at `http://<vm-ip>:4000` (see
      [docs/macos.md](docs/macos.md)). The build pins the absolute `opencode`
@@ -390,8 +392,8 @@ is not in the repo) with `autounattend.xml` answering Setup. The builder:
    CLI, ripgrep, jq, curl, Firefox, Docker CLI — versions pinned in the
    vars file; Chrome comes from Google's live ARM64 enterprise channel),
    Visual Studio Code (native arm64, direct download),
-    OpenCode (`opencode-ai`), OpenCodeReview (`ocr`), the OpenChamber web
-    UI as a native service on port 4000 (with the `OPENCODE_BINARY` pin,
+   OpenCode V2 (`@opencode/cli`), OpenCodeReview (`ocr`), the OpenChamber web
+   UI as a native service on port 4000 (with the `OPENCODE_BINARY` pin,
     like the macOS template), OpenSSH Server + RDP, and the bridge
     tooling (Node.js in-image relays; the host side is the CLI's own
     bridge forwarder — no socat — see docs/windows-qemu.md). Finishes
@@ -526,6 +528,7 @@ the foreground (with hard errors for missing prerequisites).
 | `winrm_password` | string | `sandbox1` | WinRM provisioning password; must match `autounattend.xml` |
 | `openchamber_ui_password` | string | `sandbox` | Password protecting the OpenChamber web UI |
 | `openchamber_port` | number | `4000` | TCP port of the OpenChamber web UI in the guest |
+| `openchamber_desktop_version` / `openchamber_desktop_sha256` | string | pinned | OpenChamber desktop app version + SHA256 of the win-arm64 NSIS installer |
 | `qemu_binary` | string | `./qemu-with-tpm.sh` | qemu binary (or wrapper) Packer invokes |
 | `efi_firmware_code` / `efi_firmware_vars` | string | Homebrew edk2 AAVMF | UEFI firmware paths (read-only code + NVRAM template) |
 | `vnc_bind_address` / `vnc_port_min` / `vnc_port_max` | string/number | `127.0.0.1` / `5901` / `5901` | VNC server for the build watchdog (pinned so `build` can start it without scanning for the port) |
@@ -596,8 +599,9 @@ autoinstalled by Subiquity, not unattended:
    ripgrep, vim, tmux, socat, python3, ruby; browser/X libs), hash-pinned
    direct downloads (GitHub CLI deb, Go tarball, VS Code deb, Chrome for
    Testing zip, Firefox release tarball, Docker CLI + compose + buildx
-   static binaries), nvm (Node), rustup (Rust), and npm globals
-   (opencode-ai, ocr, @openchamber/web). The guest also ships a desktop:
+   static binaries), nvm (Node), rustup (Rust), OpenCode V2 (the official
+   V2 installer), and npm globals (ocr, @openchamber/web). The guest also
+   ships a desktop:
    `ubuntu-desktop-minimal` + `open-vm-tools-desktop`, `graphical.target`
    as the default boot target and GDM3 auto-login as `admin` (Xorg
    session — software rendering, a Fusion arm64 guest has no GPU accel).
@@ -655,6 +659,7 @@ per image lives in `~/Library/Application Support/agent-dev-env/build/ubuntu-vmw
 | `memory_gb` | number | `8` | RAM of the VM in GB |
 | `openchamber_ui_password` | string | `sandbox` | Password protecting the OpenChamber web UI |
 | `openchamber_port` | number | `4000` | TCP port of the OpenChamber web UI in the guest |
+| `openchamber_desktop_version` / `openchamber_desktop_sha256` | string | pinned | OpenChamber desktop app version + SHA256 of the linux-arm64 AppImage |
 
 ### Publishing
 

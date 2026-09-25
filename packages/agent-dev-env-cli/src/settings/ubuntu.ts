@@ -18,10 +18,11 @@ export {
 
 /** Version of the settings copy. Bump when the file set or the copy logic
  *  changes: guests whose marker is older are offered the copy again.
- *  Version 4 adds the OPENCODE_MODELS_URL write (see
- *  openCodeModelsUrlScript) — existing guests get the copy offered again
- *  so the variable reaches sandboxes copied by an older CLI. */
-export const SETTINGS_VERSION = 4;
+ *  Version 6 adds the cross-agent personal settings directory
+ *  (`~/.agents`) to the copied file set — existing guests get the copy
+ *  offered again so it reaches sandboxes copied by an older CLI.
+ */
+export const SETTINGS_VERSION = 6;
 
 /** The sandbox user in the Ubuntu base image — fixed, so host home paths
  *  are rewritten to it when the settings are copied (see sanitize). */

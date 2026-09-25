@@ -273,10 +273,10 @@ with Tart. The default image ships the following software:
 | Sublime Text | latest (stable, + `subl` CLI) |
 | Google Chrome | latest (universal) |
 | Firefox | latest (universal) |
-| OpenCode | latest (AI coding agent) |
+| OpenCode | V2 (Homebrew tap formula `opencode-v2`) |
 | OpenCodeReview | latest (AI code review CLI, `ocr`, config synced from the host) |
-| OpenChamber | latest (web UI for OpenCode, auto-started on port 4000) |
-| OpenChamber desktop app | latest (native macOS app, `/Applications/OpenChamber.app`) |
+| OpenChamber | 2.x (web UI for OpenCode V2, auto-started on port 4000) |
+| OpenChamber desktop app | 2.x (native macOS app, `/Applications/OpenChamber.app`) |
 | Docker CLI | latest (`docker` + `docker compose` / `docker buildx` plugins; client only — no local engine, see [Docker (remote engine)](#docker-remote-engine)) |
 | CLI tools | `git` + `git-lfs`, `gh`, `jq`, `ripgrep`, `coreutils`, `curl`, `wget`, `socat`, `bash` |
 | Global git config | git-lfs filters, legacy `ssh-rsa` key types, CocoaPods specs repo blocked (`insteadOf`) |
@@ -566,8 +566,9 @@ credentials and preferences out of the box. What it copies:
 
 | Source (host) | Destination (guest) | Why |
 | --- | --- | --- |
+| `~/.agents/` | same path | Cross-agent personal settings: the shared skills (`~/.agents/skills/`) and their install lockfile, read by OpenCode, Copilot and Codex |
 | `~/.config/opencode/opencode.json` (or `.jsonc`) | same path | OpenCode configuration (models, providers, permissions, MCP servers, npm plugins, agents/commands defined in JSON, ...) |
-| `~/.config/opencode/tui.json` (or `.jsonc`) | same path | TUI preferences (theme, keybinds, notifications, ...) |
+| `~/.config/opencode/cli.json` (V2) or `tui.json` (V1, or `.jsonc`) | same path | Terminal preferences (theme, keybinds, notifications, ...) |
 | `~/.config/opencode/agents/` | same path | Your custom OpenCode agents (markdown agent definitions) |
 | `~/.config/opencode/commands/` | same path | Your custom OpenCode slash-commands |
 | `~/.config/opencode/modes/` | same path | Custom focus modes |
@@ -641,7 +642,7 @@ Notes:
   rewritten to the guest's home (`/Users/admin`).
 - Skills and commands in a project's `.opencode/` directory are **not**
   copied — they come into the guest via the shared work directory; only the
-  global `~/.config/opencode` ones are synced.
+  global `~/.config/opencode` and `~/.agents` ones are synced.
 - npm plugins (the `plugin` key in `opencode.json`) are **not** copied —
   OpenCode installs them automatically at startup in the guest.
 - After a copy, OpenChamber is restarted automatically so it picks up the new

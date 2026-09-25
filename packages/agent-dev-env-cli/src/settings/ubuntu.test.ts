@@ -24,14 +24,15 @@ describe('mapGuestPath', () => {
   it('keeps everything else at the same relative path', () => {
     expect(mapGuestPath('.config/opencode/opencode.json')).toBe('.config/opencode/opencode.json');
     expect(mapGuestPath('.copilot/config.json')).toBe('.copilot/config.json');
+    expect(mapGuestPath('.agents')).toBe('.agents');
     expect(mapGuestPath('.ssh/known_hosts')).toBe('.ssh/known_hosts');
     expect(mapGuestPath('.gitconfig')).toBe('.gitconfig');
   });
 });
 
 describe('Ubuntu settings constants', () => {
-  it('bumps the settings version for the models-URL copy logic', () => {
-    expect(SETTINGS_VERSION).toBe(4);
+  it('bumps the settings version for the ~/.agents copy logic', () => {
+    expect(SETTINGS_VERSION).toBe(6);
   });
 
   it('embeds the green-field marker path in the check script', () => {

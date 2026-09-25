@@ -642,6 +642,14 @@ operational incidents.
   tried and reverted — it crashed intermittently at startup with
   `0xC0000005` under Prism, which broke OpenChamber's managed
   `opencode serve`.
+- **OpenCode V2 everywhere**: all images ship OpenCode V2 — the
+  `opencode-v2` Homebrew tap formula (macOS; the tap's plain `opencode`
+  formula is still V1), the `@opencode/cli` npm package (Windows; the V1
+  package was `opencode-ai`), and the official V2 installer
+  (`https://opencode.ai/v2/install`, Ubuntu). Do not reintroduce a V1
+  install. OpenChamber is on its 2.x line (2.0.0 requires OpenCode
+  2.0.15+); the desktop installers stay hash-pinned in the vars files,
+  the web UI is an unpinned npm global like the other tools.
 - **Windows env vars need a fresh process**: Windows applies a user-scope
   environment variable only to processes started after it was written, so
   a settings copy that wrote one (`OPENCODE_MODELS_URL`) offers the guest

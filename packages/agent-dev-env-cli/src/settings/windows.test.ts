@@ -33,14 +33,15 @@ describe('mapGuestPath', () => {
     expect(mapGuestPath('.config/opencode/opencode.json')).toBe('.config/opencode/opencode.json');
     expect(mapGuestPath('.local/share/opencode/auth.json')).toBe('.local/share/opencode/auth.json');
     expect(mapGuestPath('.copilot/config.json')).toBe('.copilot/config.json');
+    expect(mapGuestPath('.agents')).toBe('.agents');
     expect(mapGuestPath('.ssh/known_hosts')).toBe('.ssh/known_hosts');
     expect(mapGuestPath('.gitconfig')).toBe('.gitconfig');
   });
 });
 
 describe('Windows settings builders', () => {
-  it('starts the settings version at 1 (fresh-guest semantics)', () => {
-    expect(SETTINGS_VERSION).toBe(1);
+  it('bumps the settings version for the ~/.agents copy logic', () => {
+    expect(SETTINGS_VERSION).toBe(3);
   });
 
   it('computes the guest home with forward slashes', () => {

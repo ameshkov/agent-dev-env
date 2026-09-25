@@ -291,10 +291,10 @@ and runs under Fusion via `vmrun`. It ships:
 | Visual Studio Code | 1.134.0 (arm64 deb, hash-pinned; `code` on PATH) |
 | Firefox | 154.0 (linux-aarch64 tarball, hash-pinned; no Chrome — CfT publishes no linux-arm64 build) |
 | Docker CLI | 29.7.2 + `docker compose` 5.5.0 + `docker buildx` 0.36.1 (static aarch64 binaries; client only — remote engine via the host bridge) |
-| OpenCode | latest (official installer) |
+| OpenCode | V2 (official V2 installer) |
 | OpenCodeReview (`ocr`) | 1.9.5 (npm global) |
-| OpenChamber web UI | latest (npm global, systemd user service on `0.0.0.0:4000`, started at boot) |
-| OpenChamber desktop app | 1.22.0 (linux-arm64 AppImage, hash-pinned; launch as `openchamber-desktop` or via the GNOME app menu) |
+| OpenChamber web UI | 2.x (npm global, systemd user service on `0.0.0.0:4000`, started at boot) |
+| OpenChamber desktop app | 2.0.0 (linux-arm64 AppImage, hash-pinned; launch as `openchamber-desktop` or via the GNOME app menu) |
 | GNOME desktop | `ubuntu-desktop-minimal` + `open-vm-tools-desktop`; boots to `graphical.target`, GDM3 auto-login as `admin`, Xorg session (software rendering — no GPU accel under Fusion) |
 | SSH | openssh-server with password auth; `admin`/sandbox1 (see the vars file) |
 | Image identity | `~/.config/agent-dev-env/image.json` (image name + `image_version`, baked at build time) |
@@ -527,8 +527,9 @@ XDG layout):
 
 | Source (host) | Destination (guest) | Why |
 | --- | --- | --- |
+| `~/.agents/` | same path | Cross-agent personal settings: the shared skills (`~/.agents/skills/`) and their install lockfile, read by OpenCode, Copilot and Codex |
 | `~/.config/opencode/opencode.json` (or `.jsonc`) | same path | OpenCode configuration (models, providers, permissions, MCP servers, npm plugins, agents/commands defined in JSON, ...) |
-| `~/.config/opencode/tui.json` (or `.jsonc`) | same path | TUI preferences (theme, keybinds, notifications, ...) |
+| `~/.config/opencode/cli.json` (V2) or `tui.json` (V1, or `.jsonc`) | same path | Terminal preferences (theme, keybinds, notifications, ...) |
 | `~/.config/opencode/agents/` | same path | Your custom OpenCode agents (markdown agent definitions) |
 | `~/.config/opencode/commands/` | same path | Your custom OpenCode slash-commands |
 | `~/.config/opencode/modes/` | same path | Custom focus modes |
@@ -600,7 +601,7 @@ Notes:
   rewritten to the guest's home (`/home/admin`).
 - Skills and commands in a project's `.opencode/` directory are **not**
   copied — they come into the guest via the shared work directory; only the
-  global `~/.config/opencode` ones are synced.
+  global `~/.config/opencode` and `~/.agents` ones are synced.
 - npm plugins (the `plugin` key in `opencode.json`) are **not** copied —
   OpenCode installs them automatically at startup in the guest.
 - After a copy, OpenChamber is restarted automatically so it picks up the new

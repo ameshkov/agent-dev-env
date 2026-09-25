@@ -13,6 +13,20 @@ the next release.
 
 ## [Unreleased]
 
+## [windows-arm64-qemu-v2.1.0] - 2026-09-25
+
+### Changed
+
+- OpenCode is now V2, installed from the `@opencode/cli` npm package
+  (the V1 package was `opencode-ai`; V2 still provides the `opencode`
+  binary). The OpenChamber web UI moves to the 2.x line — the release
+  compatible with OpenCode V2 — and the desktop app is pinned to 2.0.0
+  (win-arm64 NSIS installer, new SHA256).
+- The user-settings copy now includes the OpenCode V2 terminal config
+  (`~/.config/opencode/cli.json`), so the guest's terminal preferences
+  match the host's. The settings version was bumped so existing guests
+  are offered the re-copy once.
+
 ## [windows-arm64-qemu-v2.0.0] - 2026-09-17
 
 ### Changed
@@ -200,7 +214,8 @@ the next release.
   watermark. The sandbox agent rules (`scripts/agent-rules.md`) are
   macOS-flavored and not installed into Windows guests yet.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/windows-arm64-qemu-v2.0.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/windows-arm64-qemu-v2.1.0...HEAD
+[windows-arm64-qemu-v2.1.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-qemu-v2.1.0
 [windows-arm64-qemu-v2.0.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-qemu-v2.0.0
 [windows-arm64-qemu-v1.2.1]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-qemu-v1.2.1
 [windows-arm64-qemu-v1.2.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/windows-arm64-qemu-v1.2.0

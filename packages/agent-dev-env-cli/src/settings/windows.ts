@@ -11,8 +11,10 @@
 export type { SettingsState } from './common.js';
 
 /** Version of the settings copy. Bump when the file set or the copy logic
- *  changes: guests whose marker is older are offered the copy again. */
-export const SETTINGS_VERSION = 1;
+ *  changes: guests whose marker is older are offered the copy again.
+ *  Version 3 adds the cross-agent personal settings directory
+ *  (`~/.agents`) to the copied file set. */
+export const SETTINGS_VERSION = 3;
 
 /** The marker path inside the guest, relative to `%USERPROFILE%` (POSIX
  *  separators — the staged tree and the SFTP paths use those). */

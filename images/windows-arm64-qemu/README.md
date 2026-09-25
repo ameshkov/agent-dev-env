@@ -98,10 +98,10 @@ files and have no such directory.
 | Visual Studio Code | Native arm64 build, latest stable, direct download; `code` on PATH |
 | Google Chrome | Official Windows ARM64 enterprise MSI (live channel — no version or hash pin); native arm64 |
 | Firefox | Choco package (x64, runs under Prism emulation) |
-| OpenCode (`opencode-ai`) | npm global |
+| OpenCode (`@opencode/cli`, V2) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
-| OpenChamber web UI | npm global (`@openchamber/web`), native service on `0.0.0.0:4000` |
-| OpenChamber desktop app | win-arm64 NSIS installer, hash-pinned (see the vars file); Start Menu shortcut |
+| OpenChamber web UI | 2.x (`@openchamber/web`), native service on `0.0.0.0:4000` |
+| OpenChamber desktop app | 2.0.0 (win-arm64 NSIS installer, hash-pinned — see the vars file); Start Menu shortcut |
 | Long paths + Developer Mode | Registry (`LongPathsEnabled`, `AllowDevelopmentWithoutDevLicense`) + `git config --system core.longpaths` |
 | OpenSSH Server + RDP | Enabled; Administrator/sandbox1 (see the vars file) |
 | Docker CLI | Client only (`docker` + `docker compose`), remote engine via the host bridge |

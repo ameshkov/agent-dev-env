@@ -357,13 +357,14 @@ END
     ]
   }
 
-  # OpenCode — the AI coding agent
+  # OpenCode V2 — the AI coding agent. The tap ships V2 as `opencode-v2`
+  # (the plain `opencode` formula still installs V1 and conflicts with it).
   provisioner "shell" {
     inline = [<<-END
 set -e -x
 source ~/.zprofile
-# The recommended Homebrew tap, see https://opencode.ai/docs/
-brew install anomalyco/tap/opencode
+# The recommended Homebrew tap, see https://opencode.ai/v2/docs/
+brew install anomalyco/tap/opencode-v2
 opencode --version
 END
     ]

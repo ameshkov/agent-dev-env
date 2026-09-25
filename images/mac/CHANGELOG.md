@@ -12,6 +12,20 @@ is never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [mac-v1.9.0] - 2026-09-25
+
+### Changed
+
+- OpenCode is now V2, installed from the tap's `opencode-v2` formula
+  (`brew install anomalyco/tap/opencode-v2`; the plain `opencode`
+  formula still installs V1 and conflicts with it). The OpenChamber web
+  UI and desktop app move to the 2.x line — the release compatible with
+  OpenCode V2.
+- The user-settings copy now includes the OpenCode V2 terminal config
+  (`~/.config/opencode/cli.json`), so the guest's terminal preferences
+  match the host's. The settings version was bumped so existing guests
+  are offered the re-copy once.
+
 ## [mac-v1.8.0] - 2026-09-06
 
 ### Added
@@ -254,7 +268,8 @@ Xcode 26.4.1).
 - Visual Studio Code (latest stable) with the `code` CLI on PATH.
 - OpenCode (AI coding agent) via the anomalyco Homebrew tap.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/mac-v1.8.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/mac-v1.9.0...HEAD
+[mac-v1.9.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.9.0
 [mac-v1.8.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.8.0
 [mac-v1.6.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.6.0
 [mac-v1.5.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.5.0

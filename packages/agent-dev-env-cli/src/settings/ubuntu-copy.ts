@@ -264,8 +264,8 @@ export async function ensureUserSettings(
   if (files.length === 0) {
     logger.info(
       'No user settings found on the host (opencode config and auth, ' +
-        'OpenCodeReview config, Copilot config, VS Code config and extensions, ' +
-        '~/.ssh, ~/.gitconfig) — nothing to copy.',
+        '~/.agents, OpenCodeReview config, Copilot config, VS Code config ' +
+        'and extensions, ~/.ssh, ~/.gitconfig) — nothing to copy.',
     );
     return 'none';
   }
@@ -296,8 +296,8 @@ export async function syncUserSettings(
   if (files.length === 0) {
     logger.info(
       'No user settings found on the host (opencode config and auth, ' +
-        'OpenCodeReview config, Copilot config, VS Code config and extensions, ' +
-        '~/.ssh, ~/.gitconfig) — nothing to copy.',
+        '~/.agents, OpenCodeReview config, Copilot config, VS Code config ' +
+        'and extensions, ~/.ssh, ~/.gitconfig) — nothing to copy.',
     );
     return 'none';
   }

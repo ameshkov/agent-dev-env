@@ -254,10 +254,10 @@ and runs under `qemu-system-aarch64` with HVF. It ships:
 | Visual Studio Code | Native arm64 build, latest stable, direct download; `code` on PATH |
 | Google Chrome | Official Windows ARM64 enterprise MSI (live channel — no version or hash pin); native arm64 |
 | Firefox | Choco package (x64, runs under emulation) |
-| OpenCode (`opencode-ai`) | npm global |
+| OpenCode (`@opencode/cli`, V2) | npm global |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
-| OpenChamber web UI | npm global (`@openchamber/web`), scheduled task on `0.0.0.0:4000` |
-| OpenChamber desktop app | win-arm64 NSIS installer, hash-pinned; Start Menu shortcut |
+| OpenChamber web UI | 2.x (`@openchamber/web`), scheduled task on `0.0.0.0:4000` |
+| OpenChamber desktop app | 2.0.0 (win-arm64 NSIS installer, hash-pinned); Start Menu shortcut |
 | Long paths + Developer Mode | Registry (`LongPathsEnabled`, `AllowDevelopmentWithoutDevLicense`) + `git config --system core.longpaths` |
 | OpenSSH Server + RDP | Enabled; Administrator/sandbox1 (see the vars file) |
 | Image identity | `%USERPROFILE%\.config\agent-dev-env\image.json` (image name + `image_version`, baked at build time) |
@@ -322,8 +322,9 @@ mapped to the Windows layout):
 
 | Source (host) | Destination (guest) | Why |
 | --- | --- | --- |
+| `~/.agents/` | same path | Cross-agent personal settings: the shared skills (`~/.agents/skills/`) and their install lockfile, read by OpenCode, Copilot and Codex |
 | `~/.config/opencode/opencode.json` (or `.jsonc`) | same path | OpenCode configuration (models, providers, permissions, MCP servers, npm plugins, agents/commands defined in JSON, ...) |
-| `~/.config/opencode/tui.json` (or `.jsonc`) | same path | TUI preferences (theme, keybinds, notifications, ...) |
+| `~/.config/opencode/cli.json` (V2) or `tui.json` (V1, or `.jsonc`) | same path | Terminal preferences (theme, keybinds, notifications, ...) |
 | `~/.config/opencode/agents/` through `themes/`, `package.json` (+ lockfiles) | same path | Your custom OpenCode agents, commands, modes, plugins, skills, tools, themes and local-plugin deps |
 | `~/.local/share/opencode/auth.json` | same path | OpenCode provider credentials — no `opencode auth login` needed in the guest (opencode keeps `~/.local/share/opencode` on Windows too) |
 | `~/.opencodereview/config.json` | same path | OpenCodeReview provider/model config — `ocr` works in the guest as configured on the host |

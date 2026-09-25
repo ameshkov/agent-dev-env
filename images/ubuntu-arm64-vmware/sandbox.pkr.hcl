@@ -256,7 +256,7 @@ variable "openchamber_port" {
 
 variable "openchamber_desktop_version" {
   type        = string
-  description = "OpenChamber desktop app version, e.g. \"1.22.0\" (linux-arm64 AppImage from the GitHub releases)."
+  description = "OpenChamber desktop app version, e.g. \"2.0.0\" (linux-arm64 AppImage from the GitHub releases)."
 }
 
 variable "openchamber_desktop_sha256" {
@@ -826,9 +826,10 @@ ANDROID
         export NVM_DIR="$HOME/.nvm"
         . "$NVM_DIR/nvm.sh"
         nvm use default >/dev/null
-        # opencode via the official installer: the npm package postinstall
-        # mis-selects the arm64-musl binary on glibc systems (EBADPLATFORM).
-        curl -fsSL https://opencode.ai/install | bash
+        # OpenCode V2 via the official installer (the plain /install URL
+        # still serves V1): the npm package mis-selects the arm64-musl
+        # binary on glibc systems (EBADPLATFORM).
+        curl -fsSL https://opencode.ai/v2/install | bash
         export PATH="$HOME/.opencode/bin:$PATH"
         opencode --version
         npm install -g @alibaba-group/open-code-review@${var.open_code_review_version}

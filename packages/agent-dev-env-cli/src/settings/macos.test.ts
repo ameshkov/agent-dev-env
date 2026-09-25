@@ -11,19 +11,25 @@ import {
   openCodeModelsUrlScript,
   openchamberRestartScript,
   sanitizeGitconfig,
+  SETTINGS_VERSION,
 } from './macos.js';
 
 describe('collectSettingsFiles', () => {
   it('lists only existing files, keeping the fixed order', () => {
     const home = mkdtempSync(join(tmpdir(), 'settings-'));
     mkdirSync(join(home, '.config', 'opencode'), { recursive: true });
+    mkdirSync(join(home, '.agents', 'skills'), { recursive: true });
     mkdirSync(join(home, '.ssh'), { recursive: true });
     writeFileSync(join(home, '.config', 'opencode', 'opencode.json'), '{}');
+    writeFileSync(join(home, '.config', 'opencode', 'cli.json'), '{}');
+    writeFileSync(join(home, '.agents', '.skill-lock.json'), '{}');
     writeFileSync(join(home, '.gitconfig'), '[user]\n');
     writeFileSync(join(home, '.ssh', 'sign.sh'), '#!/bin/sh\n');
 
     const files = collectSettingsFiles(home);
+    expect(files).toContain('.agents');
     expect(files).toContain('.config/opencode/opencode.json');
+    expect(files).toContain('.config/opencode/cli.json');
     expect(files).toContain('.gitconfig');
     expect(files).not.toContain('.copilot/config.json');
     // the fixed list comes before the ~/.ssh glob
@@ -41,6 +47,12 @@ describe('collectSettingsFiles', () => {
   it('returns an empty list for an empty home', () => {
     const home = mkdtempSync(join(tmpdir(), 'settings-'));
     expect(collectSettingsFiles(home)).toEqual([]);
+  });
+});
+
+describe('macOS settings constants', () => {
+  it('bumps the settings version for the ~/.agents copy logic', () => {
+    expect(SETTINGS_VERSION).toBe(12);
   });
 });
 

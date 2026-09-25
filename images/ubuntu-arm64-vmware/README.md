@@ -109,10 +109,10 @@ build no files and have no such directory.
 | Visual Studio Code | `code_<version>_arm64.deb`, hash-pinned; `code` on PATH |
 | Firefox | Official linux-aarch64 release tarball, hash-pinned; `/opt/firefox` (no Chrome: CfT publishes no linux-arm64 build, Ubuntu's chromium is snap-only) |
 | Docker CLI | Client only (`docker` + `docker compose` + `docker buildx`, static aarch64 binaries, hash-pinned); no engine — bridged from the host |
-| OpenCode (`opencode-ai`) | npm global |
+| OpenCode (V2) | official V2 installer (`~/.opencode/bin/opencode`) |
 | OpenCodeReview (`ocr`) | npm global (`@alibaba-group/open-code-review`) |
-| OpenChamber web UI | npm global (`@openchamber/web`), systemd **user** service (`agent-dev-env-openchamber`) on `0.0.0.0:4000`, started at boot (`loginctl enable-linger`) |
-| OpenChamber desktop app | linux-arm64 AppImage from the GitHub releases, hash-pinned; `/opt/openchamber/OpenChamber.AppImage` + GNOME desktop entry + `openchamber-desktop` on PATH |
+| OpenChamber web UI | 2.x (`@openchamber/web`), systemd **user** service (`agent-dev-env-openchamber`) on `0.0.0.0:4000`, started at boot (`loginctl enable-linger`) |
+| OpenChamber desktop app | 2.0.0 (linux-arm64 AppImage from the GitHub releases, hash-pinned); `/opt/openchamber/OpenChamber.AppImage` + GNOME desktop entry + `openchamber-desktop` on PATH |
 | SSH | openssh-server with password auth; `admin`/sandbox1 (see the vars file); Ubuntu's default cloud-init finalization |
 | Image identity | `~/.config/agent-dev-env/image.json` (image name + `image_version`, baked at build time) |
 | systemd user services | Linger enabled for `admin`; the guest agent's bridge services and OpenChamber auto-start in the guest |

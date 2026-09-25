@@ -261,7 +261,7 @@ variable "openchamber_port" {
 
 variable "openchamber_desktop_version" {
   type        = string
-  description = "OpenChamber desktop app version, e.g. \"1.22.0\" (win-arm64 NSIS installer from the GitHub releases)."
+  description = "OpenChamber desktop app version, e.g. \"2.0.0\" (win-arm64 NSIS installer from the GitHub releases)."
 }
 
 variable "openchamber_desktop_sha256" {
@@ -561,7 +561,7 @@ build {
       # Node.js — the official win-arm64 build (nodejs.org zip), not the
       # Chocolatey package: 'choco install nodejs' installs the x64 build,
       # which on this ARM64 guest runs under x64 emulation. Every npm
-      # global (opencode-ai, pnpm/yarn, @openchamber/web, ...) then picks
+      # global (@opencode/cli, pnpm/yarn, @openchamber/web, ...) then picks
       # x64 binaries and opencode's native session path crashes
       # intermittently (0xC0000005). The zip is hash-pinned and extracted
       # into the standard install location, so the rest of the toolchain
@@ -1008,7 +1008,9 @@ build {
         }
         throw "npm $argsLine failed after 3 attempts"
       }
-      Invoke-NpmRetry "install -g opencode-ai"
+      # OpenCode V2 (the V1 package was opencode-ai; V2 is @opencode/cli,
+      # still providing the `opencode` binary).
+      Invoke-NpmRetry "install -g @opencode/cli"
       # Package managers for frontend/Node projects — parity with the
       # mac/Ubuntu sandboxes (npm globals in %APPDATA%\npm, already on the
       # machine PATH through the toolchain provisioner's $toolPaths).

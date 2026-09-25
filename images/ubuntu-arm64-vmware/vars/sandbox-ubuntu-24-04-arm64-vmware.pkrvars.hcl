@@ -65,10 +65,11 @@ android_cmdline_tools_version = "14742923"
 android_cmdline_tools_sha256 = "04453066b540409d975c676d781da1477479dde3761310f1a7eb92a1dfb15af7"
 android_sdk_packages = ["ndk;29.0.14206865", "build-tools;34.0.0"]
 
-# OpenChamber desktop app (linux-arm64 AppImage from the GitHub releases,
-# hash-pinned) — parity with the mac image's openchamber cask.
-openchamber_desktop_version = "1.22.0"
-openchamber_desktop_sha256 = "bab9b4acb53d88bbde4c7e3c2a7d4fac92ea43cbbf2b7c94c9f16c8cb82cd5e5"
+# OpenChamber desktop app 2.0.0 — the OpenCode V2-compatible release
+# (linux-arm64 AppImage from the GitHub releases, hash-pinned) — parity
+# with the mac image's openchamber cask.
+openchamber_desktop_version = "2.0.0"
+openchamber_desktop_sha256 = "7ddfaba7c98ee86123dd8266a87dd8b68c81bf4a86f1e4ca3066dec4ca42c3da"
 
 # VM resources
 disk_size = 100
@@ -92,4 +93,4 @@ openchamber_port = 4000
 # besides :latest). For every release: bump it, add a CHANGELOG.md entry,
 # and create the ubuntu-arm64-vmware-v<version> git tag
 # (npx agent-dev-env tag <image>).
-image_version = "2.0.0"
+image_version = "2.1.0"
