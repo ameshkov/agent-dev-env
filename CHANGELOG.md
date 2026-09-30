@@ -13,6 +13,13 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Fixed
+
+- The macOS `run` no longer hangs at "Restarting the Tart guest agent"
+  on a freshly booted VM — each guest-agent probe is now bounded and
+  retried, so a `tart exec` that never answers is killed instead of
+  blocking the CLI forever.
+
 ## [0.6.0] - 2026-09-25
 
 ### Added

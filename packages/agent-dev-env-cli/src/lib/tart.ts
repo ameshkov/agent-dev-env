@@ -309,15 +309,26 @@ export function kickstartGuestAgent(vm: string): Promise<RunResult> {
 
 /** Polls the guest agent's `tart exec` RPC until it answers again after a
  *  kickstart — the RPC server exists only in the `--run-agent` instance.
+ *  Every probe is bounded: a `tart exec` issued while the agent is down
+ *  or still starting (a freshly booted VM) does not fail — it waits for
+ *  an RPC server that may never answer the request, and an unbounded
+ *  wait hangs the CLI at the restart step. A timed-out attempt is killed
+ *  and retried on a fresh connection.
  *
  * @param vm - The VM name (must be running).
- * @param tries - Poll attempts (10 = up to ~10 s).
+ * @param tries - Poll attempts.
  * @param delayMs - Delay between attempts.
+ * @param timeoutMs - Per-attempt bound (kills a wedged `tart exec`).
  * @returns True when `tart exec` answers again.
  */
-export async function waitForGuestAgent(vm: string, tries = 10, delayMs = 1000): Promise<boolean> {
+export async function waitForGuestAgent(
+  vm: string,
+  tries = 10,
+  delayMs = 1000,
+  timeoutMs = 5000,
+): Promise<boolean> {
   for (let attempt = 0; attempt < tries; attempt += 1) {
-    const res = await execVm(vm, ['sh', '-lc', 'echo ready']);
+    const res = await execVm(vm, ['sh', '-lc', 'echo ready'], { timeoutMs });
     if (res.code === 0 && res.stdout.trim() === 'ready') {
       return true;
     }
