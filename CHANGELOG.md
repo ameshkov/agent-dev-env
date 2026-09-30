@@ -13,6 +13,8 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-30
+
 ### Fixed
 
 - The macOS `run` no longer hangs at "Restarting the Tart guest agent"
@@ -230,7 +232,8 @@ never removed — changes land there until the next release.
   repo with `-C` stay on the target repo even when the CLI itself runs
   inside a git hook.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.6.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/agent-dev-env-v0.6.1...HEAD
+[0.6.1]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.6.1
 [0.6.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.6.0
 [0.5.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.5.0
 [0.4.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/agent-dev-env-v0.4.0
