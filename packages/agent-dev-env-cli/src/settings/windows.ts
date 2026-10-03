@@ -12,9 +12,11 @@ export type { SettingsState } from './common.js';
 
 /** Version of the settings copy. Bump when the file set or the copy logic
  *  changes: guests whose marker is older are offered the copy again.
- *  Version 3 adds the cross-agent personal settings directory
- *  (`~/.agents`) to the copied file set. */
-export const SETTINGS_VERSION = 3;
+ *  Version 4 restarts OpenCode's background service (`opencode service
+ *  restart`) after the copy, next to OpenChamber — existing guests get the
+ *  copy offered again so the restart reaches sandboxes copied by an older
+ *  CLI. */
+export const SETTINGS_VERSION = 4;
 
 /** The marker path inside the guest, relative to `%USERPROFILE%` (POSIX
  *  separators — the staged tree and the SFTP paths use those). */
@@ -153,6 +155,35 @@ export function openchamberRestartCommand(): string {
     'Start-Sleep -Seconds 2',
     'schtasks /Run /TN dev.openchamber.web 2>$null | Out-Null',
     "if ($LASTEXITCODE -eq 0) { Write-Output 'restart-ok' } else { Write-Output 'restart-fail' }",
+    '',
+  ].join('\n');
+}
+
+/** The guest-side OpenCode background-service restart — a PowerShell
+ *  snippet. OpenCode's shared background service (`opencode serve
+ *  --service` — the server the `opencode` TUI and API clients connect to)
+ *  owns sessions and caches the configuration, credentials and model
+ *  registry it read at startup, so a settings copy must restart it like
+ *  OpenChamber. Re-reads the user-scope OPENCODE_MODELS_URL into the
+ *  process environment first (the SSH session predates the registry
+ *  write), then restarts the service through its npm shim; the shim is
+ *  resolved from PATH with the image's `%APPDATA%\npm` fallback, because
+ *  a just-rebooted guest can serve sshd with a stale session PATH (see
+ *  findGuestNode). Prints `opencode-restart-ok` on success,
+ *  `opencode-restart-fail` otherwise.
+ *
+ * @returns The script text (ASCII).
+ */
+export function openCodeServiceRestartCommand(): string {
+  return [
+    "$modelsUrl = [Environment]::GetEnvironmentVariable('OPENCODE_MODELS_URL', 'User')",
+    'if ($modelsUrl) { $env:OPENCODE_MODELS_URL = $modelsUrl }',
+    '$openCode = (Get-Command opencode.cmd -ErrorAction SilentlyContinue).Source',
+    "if (-not $openCode) { $openCode = Join-Path $env:APPDATA 'npm\\opencode.cmd' }",
+    "if (-not (Test-Path $openCode)) { Write-Output 'opencode-restart-fail' } else {",
+    '  & $openCode service restart',
+    "  if ($LASTEXITCODE -eq 0) { Write-Output 'opencode-restart-ok' } else { Write-Output 'opencode-restart-fail' }",
+    '}',
     '',
   ].join('\n');
 }

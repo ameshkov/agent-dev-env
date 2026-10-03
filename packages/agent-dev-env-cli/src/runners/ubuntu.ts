@@ -10,7 +10,7 @@ import { logger } from '../lib/logger.js';
 import { instanceDir } from '../lib/paths.js';
 import { openSshSession, waitForSshd } from '../lib/ssh.js';
 import { startVm } from '../lib/vmrun.js';
-import { ensureUserSettings, restartOpenchamber } from '../settings/ubuntu-copy.js';
+import { ensureUserSettings, restartGuestServices } from '../settings/ubuntu-copy.js';
 import type { RunContext, RunState, SandboxBackend } from './framework.js';
 import { ensureBridgeDir } from './bridges.js';
 import { offerOpenInBrowser, waitForOpenchamber } from './openchamber.js';
@@ -104,7 +104,7 @@ async function setupSettings(context: RunContext, state: RunState): Promise<void
       creds.password,
     );
     if (state.settings === 'copied') {
-      await restartOpenchamber(session);
+      await restartGuestServices(session);
     }
   } catch (err) {
     state.settings = 'failed';

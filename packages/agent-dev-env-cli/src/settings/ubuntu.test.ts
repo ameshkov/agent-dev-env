@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { mapGuestPath, openCodeModelsUrlScript, SETTINGS_VERSION } from './ubuntu.js';
+import {
+  mapGuestPath,
+  openCodeModelsUrlScript,
+  openCodeServiceRestartCommand,
+  SETTINGS_VERSION,
+} from './ubuntu.js';
 import { guestSettingsCheckScript } from './common.js';
 
 describe('mapGuestPath', () => {
@@ -31,13 +36,24 @@ describe('mapGuestPath', () => {
 });
 
 describe('Ubuntu settings constants', () => {
-  it('bumps the settings version for the ~/.agents copy logic', () => {
-    expect(SETTINGS_VERSION).toBe(6);
+  it('bumps the settings version for the OpenCode service restart logic', () => {
+    expect(SETTINGS_VERSION).toBe(7);
   });
 
   it('embeds the green-field marker path in the check script', () => {
     const script = guestSettingsCheckScript();
     expect(script).toContain('$HOME/.config/agent-dev-env/settings-copied');
+  });
+});
+
+describe('openCodeServiceRestartCommand', () => {
+  it('restarts the image opencode binary and sources the models-url env file', () => {
+    const script = openCodeServiceRestartCommand();
+    expect(script).toContain('opencode_bin="$HOME/.opencode/bin/opencode"');
+    expect(script).toContain('"$opencode_bin" service restart');
+    expect(script).toContain('. "$HOME/.config/agent-dev-env/models-url.env"');
+    expect(script).toContain('opencode-restart-ok');
+    expect(script).toContain('opencode-restart-fail');
   });
 });
 

@@ -18,11 +18,12 @@ export {
 
 /** Version of the settings copy. Bump when the file set or the copy logic
  *  changes: guests whose marker is older are offered the copy again.
- *  Version 6 adds the cross-agent personal settings directory
- *  (`~/.agents`) to the copied file set — existing guests get the copy
- *  offered again so it reaches sandboxes copied by an older CLI.
+ *  Version 7 restarts OpenCode's background service (`opencode service
+ *  restart`) after the copy, next to OpenChamber — existing guests get the
+ *  copy offered again so the restart reaches sandboxes copied by an older
+ *  CLI.
  */
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 
 /** The sandbox user in the Ubuntu base image — fixed, so host home paths
  *  are rewritten to it when the settings are copied (see sanitize). */
@@ -80,6 +81,36 @@ export function guestUnpackScript(password: string): string {
  */
 export function openchamberRestartCommand(): string {
   return 'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; systemctl --user restart agent-dev-env-openchamber';
+}
+
+/** The guest-side OpenCode background-service restart — `sh -c` over ssh
+ *  exec. OpenCode's shared background service (`opencode serve
+ *  --service` — the server the `opencode` TUI and API clients connect to)
+ *  owns sessions and caches the configuration, credentials and model
+ *  registry it read at startup, so a settings copy must restart it like
+ *  OpenChamber. The image installs opencode at ~/.opencode/bin (the
+ *  OpenChamber unit's OPENCODE_BINARY); the absolute path is used because
+ *  a non-login SSH shell never sources ~/.profile. Sources the
+ *  green-field models-url env file first so the restarted service keeps
+ *  the custom registry; prints `opencode-restart-ok` on success,
+ *  `opencode-restart-fail` otherwise.
+ *
+ * @returns The script text.
+ */
+export function openCodeServiceRestartCommand(): string {
+  return [
+    'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
+    'if [ -f "$HOME/.config/agent-dev-env/models-url.env" ]; then',
+    '  . "$HOME/.config/agent-dev-env/models-url.env" 2>/dev/null || true',
+    'fi',
+    'opencode_bin="$HOME/.opencode/bin/opencode"',
+    'if [ -x "$opencode_bin" ] && "$opencode_bin" service restart >/dev/null 2>&1; then',
+    "  printf '%s\\n' 'opencode-restart-ok'",
+    'else',
+    "  printf '%s\\n' 'opencode-restart-fail'",
+    'fi',
+    '',
+  ].join('\n');
 }
 
 /** The guest-side OPENCODE_MODELS_URL write — a POSIX sh script: writes

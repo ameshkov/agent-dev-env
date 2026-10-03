@@ -19,11 +19,12 @@ export {
 
 /** Version of the settings copy. Bump when the file set or the copy logic
  *  changes: guests whose marker is older are offered the copy again.
- *  Version 12 adds the cross-agent personal settings directory
- *  (`~/.agents`) to the copied file set — existing guests get the copy
- *  offered again so it reaches sandboxes copied by an older CLI.
+ *  Version 13 restarts OpenCode's background service (`opencode service
+ *  restart`) after the copy, next to OpenChamber — existing guests get the
+ *  copy offered again so the restart reaches sandboxes copied by an older
+ *  CLI.
  */
-export const SETTINGS_VERSION = 12;
+export const SETTINGS_VERSION = 13;
 
 /** The sandbox user in the macOS base image — fixed, so host home paths
  *  are rewritten to it when the settings are copied (see sanitize).
@@ -71,6 +72,32 @@ export function openchamberRestartScript(port: number): string {
     'fi',
     'openchamber startup disable 2>/dev/null || true',
     `exec openchamber startup enable --port ${port} --lan --ui-password "$ui_password"`,
+    '',
+  ].join('\n');
+}
+
+/** The guest-side OpenCode background-service restart — `sh -s` stdin
+ *  script. OpenCode's shared background service (`opencode serve
+ *  --service` — the server the `opencode` TUI and API clients connect to)
+ *  owns sessions and caches the configuration, credentials and model
+ *  registry it read at startup, so a settings copy must restart it like
+ *  OpenChamber. Sources ~/.zprofile for the Homebrew PATH and the
+ *  models-url env file, then runs `opencode service restart` best-effort;
+ *  prints `opencode-restart-ok` on success, `opencode-restart-fail`
+ *  otherwise (the script itself always exits 0).
+ *
+ * @returns The script text.
+ */
+export function openCodeServiceRestartScript(): string {
+  return [
+    'if [ -f "$HOME/.zprofile" ]; then',
+    '    . "$HOME/.zprofile" 2>/dev/null || true',
+    'fi',
+    'if command -v opencode >/dev/null 2>&1 && opencode service restart >/dev/null 2>&1; then',
+    "    printf '%s\\n' 'opencode-restart-ok'",
+    'else',
+    "    printf '%s\\n' 'opencode-restart-fail'",
+    'fi',
     '',
   ].join('\n');
 }

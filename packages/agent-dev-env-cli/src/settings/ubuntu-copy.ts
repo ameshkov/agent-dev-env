@@ -36,6 +36,7 @@ import {
   GUEST_HOME,
   mapGuestPath,
   openCodeModelsUrlScript,
+  openCodeServiceRestartCommand,
   openchamberRestartCommand,
   SETTINGS_VERSION,
   type SettingsState,
@@ -206,13 +207,28 @@ async function copySettingsToGuest(
   }
 }
 
+/** Restarts the guest services so a fresh settings copy takes effect:
+ *  OpenChamber (the systemd user service) and OpenCode's background
+ *  service (`opencode service restart` — the shared server caches the
+ *  configuration, credentials and model registry it read at startup).
+ *  Both are non-fatal: a failure warns, like the shell.
+ *
+ * @param session - The connected guest session.
+ * @returns True when both restarts succeeded.
+ */
+export async function restartGuestServices(session: SshSession): Promise<boolean> {
+  const openchamber = await restartOpenchamber(session);
+  const opencode = await restartOpenCodeService(session);
+  return openchamber && opencode;
+}
+
 /** Restarts OpenChamber so a fresh settings copy takes effect (the
- *  systemd user service; non-fatal — warns on failure like the shell).
+ *  systemd user service).
  *
  * @param session - The connected guest session.
  * @returns True when restarted.
  */
-export async function restartOpenchamber(session: SshSession): Promise<boolean> {
+async function restartOpenchamber(session: SshSession): Promise<boolean> {
   const res = await session.exec(openchamberRestartCommand());
   if (res.code !== 0) {
     logger.warn(
@@ -221,6 +237,26 @@ export async function restartOpenchamber(session: SshSession): Promise<boolean> 
     return false;
   }
   logger.ok('Restarted OpenChamber so it picks up the new user settings.');
+  return true;
+}
+
+/** Restarts OpenCode's shared background service so it re-reads the
+ *  copied config, credentials and model registry (the TUI and API clients
+ *  connect to it; OpenChamber runs its own `opencode serve` and is
+ *  restarted separately).
+ *
+ * @param session - The connected guest session.
+ * @returns True when restarted.
+ */
+async function restartOpenCodeService(session: SshSession): Promise<boolean> {
+  const res = await session.exec(openCodeServiceRestartCommand());
+  if (res.code !== 0 || !res.stdout.includes('opencode-restart-ok')) {
+    logger.warn(
+      'could not restart the OpenCode background service — it will pick up the new settings on its next start.',
+    );
+    return false;
+  }
+  logger.ok('Restarted the OpenCode background service so it picks up the new settings.');
   return true;
 }
 
@@ -278,7 +314,8 @@ export async function ensureUserSettings(
   return 'copied';
 }
 
-/** The `sync` flow: always copies (no marker gate) + restarts OpenChamber.
+/** The `sync` flow: always copies (no marker gate) + restarts the guest
+ *  services.
  *
  * @param session - The connected guest session.
  * @param home - The host home directory.
@@ -307,6 +344,6 @@ export async function syncUserSettings(
   }
   await copySettingsToGuest(session, files, home, password);
   logger.ok(`Copied ${files.length} item(s) into the guest (version ${SETTINGS_VERSION}).`);
-  await restartOpenchamber(session);
+  await restartGuestServices(session);
   return 'copied';
 }

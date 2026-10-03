@@ -30,7 +30,7 @@ import {
   vmState,
   waitForVmState,
 } from '../lib/tart.js';
-import { ensureUserSettings, restartOpenchamber } from '../settings/macos-copy.js';
+import { ensureUserSettings, restartGuestServices } from '../settings/macos-copy.js';
 import type { RunContext, RunState, SandboxBackend } from './framework.js';
 import { ensureBridgeDir } from './bridges.js';
 import { macosBridges } from './macos-bridges.js';
@@ -288,7 +288,7 @@ async function setupSettings(context: RunContext, state: RunState): Promise<void
     context.options.yes,
   );
   if (state.settings === 'copied') {
-    await restartOpenchamber(context.instance, context.openchamberPort);
+    await restartGuestServices(context.instance, context.openchamberPort);
   }
 }
 

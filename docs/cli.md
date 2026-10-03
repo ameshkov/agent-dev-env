@@ -222,8 +222,9 @@ Options:
 Copies the host's user settings into the guest on demand (all four
 platforms) — the same files the runner copies, always, regardless of
 the version marker. The VM must be running (start it with `run` first). It
-restarts OpenChamber so the new settings take effect, and updates the
-guest's settings marker so the runner won't re-offer the copy on its next
+restarts OpenChamber and OpenCode's background service (`opencode service
+restart`) so the new settings take effect, and updates the guest's
+settings marker so the runner won't re-offer the copy on its next
 run. `--yes` skips the confirmation prompt.
 
 The Ubuntu, macOS and Windows copies also write the host's

@@ -6,6 +6,7 @@ import {
   guestSettingsMarkerScript,
   mapGuestPath,
   openCodeModelsUrlScript,
+  openCodeServiceRestartCommand,
   openchamberRestartCommand,
   SETTINGS_VERSION,
 } from './windows.js';
@@ -40,8 +41,8 @@ describe('mapGuestPath', () => {
 });
 
 describe('Windows settings builders', () => {
-  it('bumps the settings version for the ~/.agents copy logic', () => {
-    expect(SETTINGS_VERSION).toBe(3);
+  it('bumps the settings version for the OpenCode service restart logic', () => {
+    expect(SETTINGS_VERSION).toBe(4);
   });
 
   it('computes the guest home with forward slashes', () => {
@@ -71,6 +72,23 @@ describe('Windows settings builders', () => {
     expect(script).toContain('restart-ok');
   });
 
+  it('restarts the OpenCode background service through its shim', () => {
+    const script = openCodeServiceRestartCommand();
+    expect(script).toContain('$openCode service restart');
+    expect(script).toContain('opencode-restart-ok');
+    expect(script).toContain('opencode-restart-fail');
+    // The shim is resolved from PATH with the image's npm prefix as the
+    // fallback (a fresh sshd session can still miss the machine PATH).
+    expect(script).toContain('Get-Command opencode.cmd');
+    expect(script).toContain("Join-Path $env:APPDATA 'npm\\opencode.cmd'");
+    // The SSH session predates the user-scope registry write, so the
+    // restart re-reads OPENCODE_MODELS_URL into the process env.
+    expect(script).toContain(
+      "[Environment]::GetEnvironmentVariable('OPENCODE_MODELS_URL', 'User')",
+    );
+    expect(script).toContain('$env:OPENCODE_MODELS_URL = $modelsUrl');
+  });
+
   it('sets the host OPENCODE_MODELS_URL for the user + OpenChamber', () => {
     const url = 'https://tokenguard.int.agrd.dev/api/v1/models-dev';
     const script = openCodeModelsUrlScript(url);
@@ -87,6 +105,7 @@ describe('Windows settings builders', () => {
       guestApplyScript('Administrator'),
       openCodeModelsUrlScript('https://tokenguard.int.agrd.dev/api/v1/models-dev'),
       openchamberRestartCommand(),
+      openCodeServiceRestartCommand(),
     ];
     for (const script of scripts) {
       for (const char of script) {

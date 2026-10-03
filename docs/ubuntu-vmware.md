@@ -560,8 +560,10 @@ resolve in the guest. The copy writes the value to
 `~/.config/agent-dev-env/models-url.env`, points the OpenChamber systemd
 user service at it (a drop-in with `EnvironmentFile=`), sources the file
 from `~/.profile`/`~/.bashrc` for login shells and reloads the user
-manager; the OpenChamber restart that follows the copy picks it up. No
-guest reboot is needed on Ubuntu (unlike Windows).
+manager. The OpenChamber restart that follows the copy picks the drop-in
+up, and the OpenCode background-service restart (`opencode service
+restart`) sources the same file first, so both services see the custom
+registry. No guest reboot is needed on Ubuntu (unlike Windows).
 
 The step runs **once per VM**: after copying, a versioned marker file inside
 the guest (`~/.config/agent-dev-env/settings-copied`) records the settings
@@ -587,8 +589,9 @@ npx agent-dev-env sync ubuntu-vmware
 
 It copies exactly the same files as `run` (both share the same code),
 applies the host's `OPENCODE_MODELS_URL` (see above), asks for
-confirmation unless you pass `--yes`, and restarts OpenChamber so the
-new settings take effect. The VM must be running — start it with
+confirmation unless you pass `--yes`, and restarts OpenChamber and the
+OpenCode background service (`opencode service restart`) so the new
+settings take effect. The VM must be running — start it with
 `npx agent-dev-env run ubuntu-vmware` first if it isn't. A sync also
 updates the guest's version marker, so `run` won't re-offer the copy on
 its next run.
@@ -604,8 +607,9 @@ Notes:
   global `~/.config/opencode` and `~/.agents` ones are synced.
 - npm plugins (the `plugin` key in `opencode.json`) are **not** copied —
   OpenCode installs them automatically at startup in the guest.
-- After a copy, OpenChamber is restarted automatically so it picks up the new
-  config and credentials.
+- After a copy, OpenChamber and OpenCode's background service
+  (`opencode service restart`) are restarted automatically so they pick up
+  the new config and credentials.
 - SSH **keys are not copied** — authentication goes through the bridged SSH
   agent.
 - VS Code **extensions are copied** — no reinstall in the guest. Extension

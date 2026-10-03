@@ -13,6 +13,19 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- The settings copy (`run` and `sync`) now also restarts OpenCode's
+  background service (`opencode service restart`), not just OpenChamber:
+  the shared server caches the configuration, credentials and model
+  registry it read at startup, so both must restart for a fresh copy to
+  take effect. The macOS/Ubuntu restart sources the guest's
+  `models-url.env` first; the Windows one re-reads the user-scope
+  `OPENCODE_MODELS_URL` before starting the service. The settings
+  versions are bumped (macOS 13, Ubuntu 7, Windows 4), so existing
+  sandboxes are offered the copy again on their next `run` — or use
+  `sync`, which always applies it.
+
 ## [0.6.1] - 2026-09-30
 
 ### Fixed

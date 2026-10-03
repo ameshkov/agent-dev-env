@@ -27,7 +27,7 @@ import {
   swtpmSockPath,
 } from '../lib/qemu.js';
 import { openSshSession, probeSshd, type SshCredentials } from '../lib/ssh.js';
-import { ensureUserSettings, restartOpenchamber } from '../settings/windows-copy.js';
+import { ensureUserSettings, restartGuestServices } from '../settings/windows-copy.js';
 import type { RunContext, RunState, SandboxBackend } from './framework.js';
 import { ensureBridgeDir } from './bridges.js';
 import { offerOpenInBrowser, waitForOpenchamber } from './openchamber.js';
@@ -178,7 +178,7 @@ async function setupSettings(context: RunContext, state: RunState): Promise<void
     );
     state.settings = outcome.state;
     if (outcome.state === 'copied') {
-      await restartOpenchamber(session);
+      await restartGuestServices(session);
       if (outcome.envApplied) {
         await offerGuestReboot(session, context.options.yes, creds, async () => creds);
       }

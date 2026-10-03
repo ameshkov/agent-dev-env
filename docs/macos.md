@@ -182,8 +182,9 @@ in an isolated sandbox, with your code safely on the host.
   The sync command always copies everything (unlike `run`, which only
   offers the copy when the settings version changed), so this is the command
   to re-sync after editing a config on the host. `--yes` skips the
-  confirmation prompt. It restarts OpenChamber so the new settings take
-  effect, and updates the guest's settings marker — see
+  confirmation prompt. It restarts OpenChamber and the OpenCode background
+  service so the new settings take effect, and updates the guest's settings
+  marker — see
   [User settings on the guest](#user-settings-on-the-guest) for details.
 
 - **Stop the sandbox** — graceful shutdown of the guest, up to 30 seconds:
@@ -597,9 +598,10 @@ opencode resolves model IDs against a model registry (fetched from
 registry is what makes a private provider's models (e.g. `tokenguard/*`)
 resolve in the guest. The copy writes the value to
 `~/.config/agent-dev-env/models-url.env` and sources it from
-`~/.zprofile`/`~/.zshrc`; the OpenChamber restart that follows the copy
-sources `~/.zprofile` before re-creating the LaunchAgent, so the variable
-lands in the service environment. No guest reboot is needed.
+`~/.zprofile`/`~/.zshrc`. The service restarts that follow the copy
+source `~/.zprofile` first — OpenChamber re-creates the LaunchAgent from
+it, and `opencode service restart` picks up the registry URL — so both
+services see the variable. No guest reboot is needed.
 
 The step runs **once per VM**: after copying, a versioned marker file inside
 the guest (`~/.config/agent-dev-env/settings-copied`) records the settings
@@ -623,8 +625,9 @@ npx agent-dev-env sync macos
 
 It copies exactly the same files as `run` (both share the same code),
 applies the host's `OPENCODE_MODELS_URL` (see above), asks for
-confirmation unless you pass `--yes`, and restarts OpenChamber so the
-new settings take effect. The VM must be running — start it with
+confirmation unless you pass `--yes`, and restarts OpenChamber and the
+OpenCode background service (`opencode service restart`) so the new
+settings take effect. The VM must be running — start it with
 `npx agent-dev-env run macos` first if it isn't. A sync also updates the
 guest's version marker, so `run` won't re-offer the copy on its next run.
 Like the runner, sync honors `SANDBOX_VM` (default
@@ -645,8 +648,9 @@ Notes:
   global `~/.config/opencode` and `~/.agents` ones are synced.
 - npm plugins (the `plugin` key in `opencode.json`) are **not** copied —
   OpenCode installs them automatically at startup in the guest.
-- After a copy, OpenChamber is restarted automatically so it picks up the new
-  config and credentials.
+- After a copy, OpenChamber and OpenCode's background service
+  (`opencode service restart`) are restarted automatically so they pick up
+  the new config and credentials.
 - SSH **keys are not copied** — authentication goes through the bridged SSH
   agent (see [docs/ssh-agent.md](ssh-agent.md)).
 - VS Code **extensions are copied** — no reinstall in the guest. Extension

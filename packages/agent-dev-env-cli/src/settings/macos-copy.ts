@@ -1,7 +1,7 @@
 // settings/macos-copy.ts — the IO half of the macOS user-settings copy:
 // tar streams over `tart exec -i` (binary-safe pipe — tar may contain
 // arbitrary content, so the text-oriented run() helpers cannot carry
-// it), the marker check/write, the OpenChamber restart, and the two
+// it), the marker check/write, the guest service restarts, and the two
 // flows: `ensure` (run step, marker-gated) and `sync` (on demand), plus
 // the OPENCODE_MODELS_URL write (the green-field env file sourced from
 // ~/.zprofile/~/.zshrc, built by openCodeModelsUrlScript).
@@ -20,6 +20,7 @@ import {
   guestUnpackCommand,
   GUEST_HOME,
   openCodeModelsUrlScript,
+  openCodeServiceRestartScript,
   openchamberRestartScript,
   sanitizeGitconfig,
   SETTINGS_VERSION,
@@ -203,19 +204,34 @@ export function stageSanitizedGitconfig(home: string, staging: string): boolean 
   }
 }
 
+/** Restarts the guest services so a fresh settings copy takes effect:
+ *  OpenChamber (the LaunchAgent re-snapshot) and OpenCode's background
+ *  service (`opencode service restart` — the shared server caches the
+ *  configuration, credentials and model registry it read at startup).
+ *  Both are non-fatal: a failure warns, like the shell.
+ *
+ * @param vm - The running VM name.
+ * @param port - The OpenChamber web port (context.openchamberPort).
+ * @returns True when both restarts succeeded.
+ */
+export async function restartGuestServices(vm: string, port: number): Promise<boolean> {
+  const openchamber = await restartOpenchamber(vm, port);
+  const opencode = await restartOpenCodeService(vm);
+  return openchamber && opencode;
+}
+
 /** Restarts OpenChamber so a fresh settings copy takes effect: the
  *  LaunchAgent is re-created (`startup disable` + `startup enable`) after
  *  sourcing ~/.zprofile, so both the copied settings and the user's
  *  zprofile exports (OPENCHAMBER_DATA_DIR, OPENCODE_DATA_DIR, ...) land
  *  in the service's environment snapshot — `openchamber restart` alone
- *  would keep the old launchd environment. Returns true when the restart
- *  succeeded (warns otherwise, like the shell).
+ *  would keep the old launchd environment.
  *
  * @param vm - The running VM name.
  * @param port - The OpenChamber web port (context.openchamberPort).
  * @returns True when restarted.
  */
-export async function restartOpenchamber(vm: string, port: number): Promise<boolean> {
+async function restartOpenchamber(vm: string, port: number): Promise<boolean> {
   const res = await execVm(vm, ['sh', '-s'], { input: openchamberRestartScript(port) });
   if (res.code !== 0) {
     logger.warn(
@@ -224,6 +240,26 @@ export async function restartOpenchamber(vm: string, port: number): Promise<bool
     return false;
   }
   logger.ok('Restarted OpenChamber with the fresh environment (user settings + ~/.zprofile).');
+  return true;
+}
+
+/** Restarts OpenCode's shared background service so it re-reads the
+ *  copied config, credentials and model registry (the TUI and API clients
+ *  connect to it; OpenChamber runs its own `opencode serve` and is
+ *  restarted separately).
+ *
+ * @param vm - The running VM name.
+ * @returns True when restarted.
+ */
+async function restartOpenCodeService(vm: string): Promise<boolean> {
+  const res = await execVm(vm, ['sh', '-s'], { input: openCodeServiceRestartScript() });
+  if (res.code !== 0 || !res.stdout.includes('opencode-restart-ok')) {
+    logger.warn(
+      'could not restart the OpenCode background service — it will pick up the new settings on its next start.',
+    );
+    return false;
+  }
+  logger.ok('Restarted the OpenCode background service so it picks up the new settings.');
   return true;
 }
 
@@ -279,7 +315,8 @@ export async function ensureUserSettings(
   return 'copied';
 }
 
-/** The `sync` flow: always copies (no marker gate) + restarts OpenChamber.
+/** The `sync` flow: always copies (no marker gate) + restarts the guest
+ *  services.
  *
  * @param vm - The running VM name.
  * @param home - The host home directory.
@@ -308,6 +345,6 @@ export async function syncUserSettings(
   }
   await copySettingsToGuest(vm, files, home);
   logger.ok(`Copied ${files.length} item(s) into the guest (version ${SETTINGS_VERSION}).`);
-  await restartOpenchamber(vm, port);
+  await restartGuestServices(vm, port);
   return 'copied';
 }

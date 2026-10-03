@@ -9,6 +9,7 @@ import {
   guestSettingsMarkerScript,
   guestUnpackCommand,
   openCodeModelsUrlScript,
+  openCodeServiceRestartScript,
   openchamberRestartScript,
   sanitizeGitconfig,
   SETTINGS_VERSION,
@@ -51,8 +52,8 @@ describe('collectSettingsFiles', () => {
 });
 
 describe('macOS settings constants', () => {
-  it('bumps the settings version for the ~/.agents copy logic', () => {
-    expect(SETTINGS_VERSION).toBe(12);
+  it('bumps the settings version for the OpenCode service restart logic', () => {
+    expect(SETTINGS_VERSION).toBe(13);
   });
 });
 
@@ -102,6 +103,14 @@ describe('guest scripts', () => {
     // back from the existing LaunchAgent plist, not replaced.
     expect(script).toContain('plutil -extract EnvironmentVariables.OPENCHAMBER_UI_PASSWORD');
     expect(script).not.toContain('exec openchamber restart');
+  });
+
+  it('the OpenCode service restart sources ~/.zprofile and restarts the background service', () => {
+    const script = openCodeServiceRestartScript();
+    expect(script).toContain('. "$HOME/.zprofile"');
+    expect(script).toContain('opencode service restart');
+    expect(script).toContain('opencode-restart-ok');
+    expect(script).toContain('opencode-restart-fail');
   });
 });
 
