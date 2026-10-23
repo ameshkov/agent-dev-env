@@ -48,7 +48,7 @@ Everything a developer needs, at a glance:
 | VMware Fusion 13.6+ + Packer | Windows/Ubuntu VMware image builds | Fusion (free for personal use) + `brew install hashicorp/tap/packer` |
 | oras | GHCR pull/push of the file-based images | `brew install oras` |
 | vncdotool + Swift compiler | VNC build watchdog | `pip3 install vncdotool` (+ Xcode CLT above) |
-| ~230 GB free disk | macOS build (base image ~70 GB + 160 GB disk); ~150 GB for others | — |
+| ~230 GB free disk | macOS build (base image ~82 GB + 160 GB disk); ~150 GB for others | — |
 
 ### Bring-your-own files
 
@@ -256,7 +256,7 @@ pristine image is deleted (`--pristine`).
 
 ```bash
 # From the repository root
-pnpm agent-dev-env build sandbox-macos-tahoe
+pnpm agent-dev-env build sandbox-macos-golden-gate
 ```
 
 Without an argument, `agent-dev-env build` builds every image in
@@ -265,10 +265,10 @@ Without an argument, `agent-dev-env build` builds every image in
 Notes:
 
 - Prerequisites: see the table above (Apple Silicon + Tart + Packer).
-- The first build pulls the ~70 GB base image — be patient.
+- The first build pulls the ~82 GB base image — be patient.
 - The builder **fails if a VM with the same name already exists** (Packer
   leaves the VM in `~/.tart/vms/`). Delete it first:
-  `tart delete sandbox-macos-tahoe`.
+  `tart delete sandbox-macos-golden-gate`.
 - Set `PACKER_LOG=1` for verbose Packer output.
 
 ### Adding a new macOS version
@@ -279,20 +279,20 @@ To add a new one:
 
 1. Pick a base image tag from the
    [Cirrus Labs package list](https://github.com/orgs/cirruslabs/packages?tab=packages&q=macos-)
-   (e.g. `macos-sequoia-xcode:15.4`).
+   (e.g. `macos-golden-gate-xcode:27.1`).
 2. Copy the latest vars file:
 
    ```bash
-   cp images/mac/vars/sandbox-macos-tahoe.pkrvars.hcl \
-      images/mac/vars/sandbox-macos-sequoia.pkrvars.hcl
+   cp images/mac/vars/sandbox-macos-golden-gate.pkrvars.hcl \
+      images/mac/vars/sandbox-macos-<codename>.pkrvars.hcl
    ```
 
 3. Edit the new vars file: set `macos_version` / `xcode_version` /
    `node_version` / `python_version` / `disk_size`, set `image_version` to
    `1.0.0`, and add image-specific brew formulas to `extra_brew_formulas` if
    needed.
-4. Build locally (`pnpm agent-dev-env build sandbox-macos-sequoia`) and make
-   sure it works.
+4. Build locally (`pnpm agent-dev-env build sandbox-macos-<codename>`) and
+   make sure it works.
 5. Add a `CHANGELOG.md` entry for the initial version.
 6. Commit the new image.
 
@@ -300,10 +300,10 @@ To add a new one:
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `macos_version` | string | — | Cirrus base image macOS version, e.g. `tahoe`; part of the image name (`sandbox-macos-<macos_version>`) |
-| `xcode_version` | string | — | Cirrus base image Xcode tag, e.g. `26.5` (selects the base image only; not part of the image name) |
+| `macos_version` | string | — | Cirrus base image macOS version, e.g. `golden-gate`; part of the image name (`sandbox-macos-<macos_version>`) |
+| `xcode_version` | string | — | Cirrus base image Xcode tag, e.g. `27.1` (selects the base image only; not part of the image name) |
 | `node_version` | string | — | Node.js version installed via nvm and set as the default, e.g. `26` |
-| `python_version` | string | — | Homebrew Python version, e.g. `3.14` (also used for the unversioned `python`/`pip` aliases) |
+| `python_version` | string | — | Homebrew Python version, e.g. `3.15` (also used for the unversioned `python`/`pip` aliases) |
 | `image_version` | string | — | Semantic version this image is published under; bump it + add a `CHANGELOG.md` entry per release |
 | `disk_size` | number | `160` | VM disk size in GB; must be ≥ the Cirrus base image disk (140 GB), tart can only grow a disk |
 | `cpu_count` | number | `4` | CPU count of the VM |
@@ -324,7 +324,7 @@ Images are published to GHCR with a semantic version tag (from
 tart login ghcr.io
 
 # Push the locally built VM with its version tag and :latest
-pnpm agent-dev-env deploy sandbox-macos-tahoe
+pnpm agent-dev-env deploy sandbox-macos-golden-gate
 ```
 
 `agent-dev-env deploy` without an argument pushes every image; the GHCR
@@ -348,9 +348,9 @@ file, add the `[<platform>-v<version>]` entry to
 `images/mac/CHANGELOG.md`, commit, then:
 
 ```bash
-pnpm agent-dev-env tag sandbox-macos-tahoe   # creates mac-v1.2.0
-pnpm agent-dev-env build sandbox-macos-tahoe
-pnpm agent-dev-env deploy sandbox-macos-tahoe
+pnpm agent-dev-env tag sandbox-macos-golden-gate   # creates mac-v1.10.0
+pnpm agent-dev-env build sandbox-macos-golden-gate
+pnpm agent-dev-env deploy sandbox-macos-golden-gate
 ```
 
 `tag` verifies the clean working tree and the matching `[<tag>]`

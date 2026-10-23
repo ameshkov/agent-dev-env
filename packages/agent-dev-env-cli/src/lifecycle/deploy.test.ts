@@ -71,8 +71,8 @@ describe('deploy arg builders', () => {
 describe('deploy target resolution', () => {
   it('resolves all catalog images when nothing is requested', () => {
     const targets = resolveRequestedImages();
-    expect(targets.map((i) => i.name)).toContain('sandbox-macos-tahoe');
-    expect(resolveRequestedImages(['sandbox-macos-tahoe'])).toHaveLength(1);
+    expect(targets.map((i) => i.name)).toContain('sandbox-macos-golden-gate');
+    expect(resolveRequestedImages(['sandbox-macos-golden-gate'])).toHaveLength(1);
     expect(() => resolveRequestedImages(['nope'])).toThrow(/No vars file found/);
   });
 });

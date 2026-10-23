@@ -64,17 +64,19 @@ describe('backfillMacosClone', () => {
     writeFileSync(config, '{}');
     const expected = new Date(statSync(config).mtimeMs).toISOString();
 
-    macosProv.backfillMacosClone(context(storeHome));
+    const ctx = context(storeHome);
+    macosProv.backfillMacosClone(ctx);
 
-    const record = prov.readCloneRecord('macos', 'sandbox-macos-tahoe', INSTANCE);
+    const record = prov.readCloneRecord('macos', ctx.image, INSTANCE);
     expect(record?.backfilled).toBe(true);
     expect(record?.clonedAt).toBe(expected);
   });
 
   it('records a backfilled clone without a clone time when config is missing', () => {
-    macosProv.backfillMacosClone(context(join(tmp, 'no-store')));
+    const ctx = context(join(tmp, 'no-store'));
+    macosProv.backfillMacosClone(ctx);
 
-    const record = prov.readCloneRecord('macos', 'sandbox-macos-tahoe', INSTANCE);
+    const record = prov.readCloneRecord('macos', ctx.image, INSTANCE);
     expect(record?.backfilled).toBe(true);
     expect(record?.clonedAt).toBeUndefined();
   });

@@ -96,7 +96,7 @@ below):
 | | macOS | Windows (QEMU) | Windows (VMware) | Ubuntu (VMware) |
 | --- | --- | --- | --- | --- |
 | Hypervisor | Tart | QEMU + HVF | VMware Fusion | VMware Fusion |
-| Default image | `sandbox-macos-tahoe` | `sandbox-windows-11-arm64-qemu` | `sandbox-windows-11-arm64-vmware` | `sandbox-ubuntu-24-04-arm64-vmware` |
+| Default image | `sandbox-macos-golden-gate` | `sandbox-windows-11-arm64-qemu` | `sandbox-windows-11-arm64-vmware` | `sandbox-ubuntu-24-04-arm64-vmware` |
 | Default instance | `default-agent-dev-env` | `default-agent-dev-env` | `default-agent-dev-env` | `default-agent-dev-env` |
 | Shared host dir | `--work-dir` (Tart mount) | — | skipped (unsupported for Win11 ARM) | `--work-dir` (HGFS) |
 | Settings copy | yes | yes | yes | yes |
@@ -269,7 +269,7 @@ ship inside the npm package): name, platform, `image_version`.
 
 Builds sandbox images with Packer. Without arguments it builds every
 image; pass image names to build a subset (e.g.
-`agent-dev-env build sandbox-macos-tahoe windows-qemu`).
+`agent-dev-env build sandbox-macos-golden-gate windows-qemu`).
 
 - macOS: plain `packer init` + `packer build -var-file`.
 - windows-qemu: ISO + ARM64 virtio driver staging (`hdiutil`), swtpm,

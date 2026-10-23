@@ -37,7 +37,7 @@ describe('registerLifecycleCommands', () => {
   it('lists the available images in the build help text', () => {
     const help = commandHelp('build');
     expect(help).toContain('Available images:');
-    expect(help).toContain('sandbox-macos-tahoe (macos)');
+    expect(help).toContain('sandbox-macos-golden-gate (macos)');
   });
 
   it('explains that building with no image builds all images', () => {
@@ -48,7 +48,7 @@ describe('registerLifecycleCommands', () => {
   it('lists the available images in the deploy help text', () => {
     const help = commandHelp('deploy');
     expect(help).toContain('Available images:');
-    expect(help).toContain('sandbox-macos-tahoe (macos)');
+    expect(help).toContain('sandbox-macos-golden-gate (macos)');
   });
 
   it('explains that deploying with no image deploys all images', () => {

@@ -24,7 +24,8 @@
 ### Prerequisites
 
 - An Apple Silicon Mac (M1 or newer). macOS guests cannot run on Intel Macs.
-- macOS 13 (Ventura) or newer on the host.
+- macOS 26.6 (Tahoe) or newer on the host — the guest is macOS 27, so the
+  host must support a macOS 27 guest.
 - ~150 GB of free disk space (the image is large).
 
 ### Default account
@@ -62,7 +63,7 @@ instead of the default `/Volumes/dev`:
 npx agent-dev-env run macos --work-dir /path/to/your/workspace
 ```
 
-On first use it asks before pulling the image (~77 GB, one-time) and cloning
+On first use it asks before pulling the image (~82 GB, one-time) and cloning
 a working VM, then starts it in the background with the recommended settings
 (8 CPUs / 16 GB) and your work directory shared. When detected, it also
 bridges your SSH agent (see [docs/ssh-agent.md](ssh-agent.md)) and Docker
@@ -214,7 +215,7 @@ in an isolated sandbox, with your code safely on the host.
 
   This stops the sandbox first, then `tart delete`s the working VM — the
   next run re-clones it from the pristine image. Without `--pristine`, the
-  pristine image (~77 GB, re-pulled from GHCR on the next run) is kept when
+  pristine image (~82 GB, re-pulled from GHCR on the next run) is kept when
   deleting interactively — press `y` at the prompt or pass `--pristine` /
   `--yes` to delete it too. Options are the same `SANDBOX_VM` /
   `SANDBOX_IMAGE` overrides as `run`.
@@ -254,17 +255,17 @@ with Tart. The default image ships the following software:
 
 | Software | Version (default image) |
 | --- | --- |
-| macOS | 26 (Tahoe) |
-| Xcode | 26.5 (+ Command Line Tools) |
+| macOS | 27 (Golden Gate) |
+| Xcode | 27.1 (+ Command Line Tools) |
 | Homebrew | latest |
 | Node.js + npm | 26 (via nvm; npm globals: `pnpm`, `yarn`) |
 | nvm | latest (Node.js version manager) |
-| Python | 3.14 (`python`, `python3`, `pip`, `pip3` aliases) |
+| Python | 3.15 (`python`, `python3`, `pip`, `pip3` aliases) |
 | Ruby | latest (brew; `rbenv` for project-pinned interpreters) |
 | Go | latest (brew) |
 | Rust | pinned toolchain (rustup; aarch64/x86_64 macOS + iOS targets) |
-| Java | 17.0.11-oracle (SDKMAN; `JAVA_HOME` exported) |
-| Flutter | 3.38.3 (base image checkout at `$FLUTTER_HOME`, precached) |
+| Java | 17.0.12-oracle (SDKMAN; `JAVA_HOME` exported) |
+| Flutter | 3.47.7 (base image checkout at `$FLUTTER_HOME`, precached) |
 | Gradle | 8.7 (wrapper distribution pre-cached in `~/.gradle`) |
 | Kotlin/Native | 1.9.24 (pre-cached in `~/.konan`) |
 | Android SDK | base image (platform-tools, platforms;android-36, build-tools;36.0.0, NDK 28.2, licenses accepted) + `ndk;29.0.14206865` and `build-tools;34.0.0` pre-installed |
@@ -701,7 +702,7 @@ Notes:
 [`agent-dev-env run macos`](cli.md) is the automated way to pull, run, and
 wire up the sandbox. Everything it accepts — the full option list and the
 environment variable table — is in [the CLI reference](cli.md); the
-defaults: image `sandbox-macos-tahoe`, instance `default-agent-dev-env`
+defaults: image `sandbox-macos-golden-gate`, instance `default-agent-dev-env`
 (the Tart working VM name), agent bridge port `4100`, Docker bridge port
 `4101`, 8 CPUs / 16 GB. Logs land in
 `~/Library/Logs/agent-dev-env/tart-<vm>.log`.

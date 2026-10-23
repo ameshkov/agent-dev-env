@@ -20,7 +20,7 @@ import { PLATFORM_DIR_MAP, type Platform } from '../lib/platform.js';
 import { parseVars, readQuotedVar, type VarValue } from '../lib/vars.js';
 
 export interface CatalogImage {
-  /** Image name — the vars file stem, e.g. `sandbox-macos-tahoe`. */
+  /** Image name — the vars file stem, e.g. `sandbox-macos-golden-gate`. */
   name: string;
   /** Platform id (macos | windows-qemu | windows-vmware | ubuntu-vmware). */
   platform: Platform;

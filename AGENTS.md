@@ -244,7 +244,7 @@ first; see docs/cli.md and DEVELOPMENT.md for the flow details):
 
 | Image | Build command (from the repo root) | Requires |
 | --- | --- | --- |
-| `sandbox-macos-tahoe` | `pnpm agent-dev-env build sandbox-macos-tahoe` | Tart + Packer |
+| `sandbox-macos-golden-gate` | `pnpm agent-dev-env build sandbox-macos-golden-gate` | Tart + Packer |
 | `sandbox-windows-11-arm64-qemu` | `WINDOWS_ISO_PATH=… pnpm agent-dev-env build sandbox-windows-11-arm64-qemu` | QEMU + swtpm + Packer + Win 11 ARM64 ISO |
 | `sandbox-windows-11-arm64-vmware` | `WINDOWS_ISO_PATH=… pnpm agent-dev-env build sandbox-windows-11-arm64-vmware` | VMware Fusion 13.6+ + Packer + Win 11 ARM64 ISO |
 | `sandbox-ubuntu-24-04-arm64-vmware` | `UBUNTU_ISO_PATH=… pnpm agent-dev-env build sandbox-ubuntu-24-04-arm64-vmware` | VMware Fusion 13.6+ + Packer + Ubuntu 24.04 ARM64 ISO |
@@ -257,7 +257,7 @@ works: DEVELOPMENT.md.
 
 Outputs go under `<data>/build/<platform>/` — except macOS, where the
 `tart` builder leaves the VM in the Tart store (`~/.tart/vms/`). The
-first macOS build pulls a ~70 GB base image. `agent-dev-env doctor`
+first macOS build pulls a ~82 GB base image. `agent-dev-env doctor`
 performs the whole prerequisite and disk check.
 
 ## Releases, Tags, and Changelogs

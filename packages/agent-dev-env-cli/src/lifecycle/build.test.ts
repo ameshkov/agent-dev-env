@@ -5,11 +5,11 @@ describe('build image resolution', () => {
   it('resolves all catalog images when nothing is requested', () => {
     const targets = resolveRequestedImages();
     expect(targets.length).toBeGreaterThanOrEqual(1);
-    expect(targets.map((i) => i.name)).toContain('sandbox-macos-tahoe');
+    expect(targets.map((i) => i.name)).toContain('sandbox-macos-golden-gate');
   });
 
   it('resolves requested images by name in order', () => {
-    const targets = resolveRequestedImages(['sandbox-macos-tahoe']);
+    const targets = resolveRequestedImages(['sandbox-macos-golden-gate']);
     expect(targets).toHaveLength(1);
     expect(targets[0].platform).toBe('macos');
   });

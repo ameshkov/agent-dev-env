@@ -12,6 +12,19 @@ is never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+## [mac-v1.10.0] - 2026-10-23
+
+### Changed
+
+- The base image is now `ghcr.io/cirruslabs/macos-golden-gate-xcode:27.1`
+  (macOS 27 Golden Gate, Xcode 27.1). The image name is fixed per macOS
+  version, so the image is now `sandbox-macos-golden-gate`, and it becomes
+  the CLI's default macOS image. The `sandbox-macos-tahoe` package on GHCR
+  keeps its last published version.
+- The toolchain pins move to the current stable releases: Python 3.15,
+  Rust 1.99, Flutter 3.47.7 and JDK 17.0.12 (Oracle, via SDKMAN).
+- The Tart Packer plugin requirement is now `>= 1.21.0`.
+
 ## [mac-v1.9.0] - 2026-09-25
 
 ### Changed
@@ -268,7 +281,8 @@ Xcode 26.4.1).
 - Visual Studio Code (latest stable) with the `code` CLI on PATH.
 - OpenCode (AI coding agent) via the anomalyco Homebrew tap.
 
-[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/mac-v1.9.0...HEAD
+[unreleased]: https://github.com/ameshkov/agent-dev-env/compare/mac-v1.10.0...HEAD
+[mac-v1.10.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.10.0
 [mac-v1.9.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.9.0
 [mac-v1.8.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.8.0
 [mac-v1.6.0]: https://github.com/ameshkov/agent-dev-env/releases/tag/mac-v1.6.0

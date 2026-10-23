@@ -13,7 +13,7 @@ Each image is a single macOS version; the image name is fixed per version
 
 | Image | macOS |
 | --- | --- |
-| `sandbox-macos-tahoe` | 26 (Tahoe) |
+| `sandbox-macos-golden-gate` | 27 (Golden Gate) |
 
 ## Versioning
 
@@ -35,15 +35,15 @@ The Tart Packer plugin is installed automatically by `packer init`.
 npx agent-dev-env build <image-name>
 
 # Example:
-npx agent-dev-env build sandbox-macos-tahoe
+npx agent-dev-env build sandbox-macos-golden-gate
 
 # Or build every image:
 npx agent-dev-env build
 ```
 
 `agent-dev-env` is the CLI shipped by this repo (see
-[docs/cli.md](../../docs/cli.md)). The first build pulls the ~70 GB base
-image (`ghcr.io/cirruslabs/macos-tahoe-xcode:26.5`) and takes a while.
+[docs/cli.md](../../docs/cli.md)). The first build pulls the ~82 GB base
+image (`ghcr.io/cirruslabs/macos-golden-gate-xcode:27.1`) and takes a while.
 Note that the builder fails if a VM with the same name already exists —
 remove it first with `tart delete <image-name>`.
 
@@ -51,7 +51,7 @@ remove it first with `tart delete <image-name>`.
 
 Images are published to GHCR under
 `ghcr.io/<owner>/<image>:<version>` (the package name equals the image
-name, e.g. `sandbox-macos-tahoe`) — build locally with
+name, e.g. `sandbox-macos-golden-gate`) — build locally with
 `npx agent-dev-env build`, then push with `npx agent-dev-env deploy`. The
 version tag is the image's `image_version` from its vars file:
 
@@ -59,5 +59,5 @@ version tag is the image's `image_version` from its vars file:
 # One-time: authenticate against GHCR with a token that has `packages:write`
 tart login ghcr.io
 
-npx agent-dev-env deploy sandbox-macos-tahoe
+npx agent-dev-env deploy sandbox-macos-golden-gate
 ```

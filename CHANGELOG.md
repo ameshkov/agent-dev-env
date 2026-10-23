@@ -13,6 +13,15 @@ never removed — changes land there until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- The macOS sandbox now uses macOS 27 (Golden Gate) with Xcode 27.1. The
+  default image is `sandbox-macos-golden-gate` — the image name is fixed
+  per macOS version, so `sandbox-macos-tahoe` is no longer built. Existing
+  sandboxes keep their macOS 26 working VM until the instance is deleted
+  and recreated. The image also moves to Python 3.15, Rust 1.99, Flutter
+  3.47.7 and JDK 17.0.12 (see `images/mac/CHANGELOG.md`).
+
 ## [0.7.0] - 2026-10-03
 
 ### Added

@@ -46,7 +46,7 @@ export interface PlatformDefaults {
 
 export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
   macos: {
-    image: 'sandbox-macos-tahoe',
+    image: 'sandbox-macos-golden-gate',
     stateDir: 'macos',
     agentPort: 4100,
     dockerPort: 4101,
@@ -59,7 +59,7 @@ export const PLATFORM_DEFAULTS: Record<Platform, PlatformDefaults> = {
     supportsSettings: true,
     supportsSync: true,
     supportsPristineDelete: true,
-    downloadHint: '~77 GB',
+    downloadHint: '~82 GB',
   },
   'windows-qemu': {
     image: 'sandbox-windows-11-arm64-qemu',

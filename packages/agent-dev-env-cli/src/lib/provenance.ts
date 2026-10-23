@@ -237,7 +237,7 @@ export const CLONE_RECORD_MISSING =
 /** Formats a clone record for status/summary lines.
  * @param record - The clone record.
  * @returns A one-line description, e.g.
- *   `sandbox-macos-tahoe <- tart ghcr.io/...:latest @ sha256:...; cloned 2026-08-19`
+ *   `sandbox-macos-golden-gate <- tart ghcr.io/...:latest @ sha256:...; cloned 2026-08-19`
  */
 export function describeCloneRecord(record: CloneRecord): string {
   const cf = record.clonedFrom;

@@ -1,7 +1,7 @@
 packer {
   required_plugins {
     tart = {
-      version = ">= 1.20.0"
+      version = ">= 1.21.0"
       source  = "github.com/cirruslabs/tart"
     }
   }
@@ -84,14 +84,14 @@ variable "node_version" {
 
 variable "python_version" {
   type = string
-  # Homebrew Python version, e.g. "3.14"; also used for the unversioned
+  # Homebrew Python version, e.g. "3.15"; also used for the unversioned
   # python/python3/pip/pip3 aliases.
 }
 
 # Optional toolchain versions. Empty (or an empty list) skips the tool; the
 # non-empty values live in the image's vars file — see
-# vars/sandbox-macos-tahoe.pkrvars.hcl. The Cirrus base images already ship
-# Flutter (at $FLUTTER_HOME) and the full Android SDK (cmdline-tools,
+# vars/sandbox-macos-golden-gate.pkrvars.hcl. The Cirrus base images already
+# ship Flutter (at $FLUTTER_HOME) and the full Android SDK (cmdline-tools,
 # platform-tools, platforms;android-36, build-tools;36.0.0, NDK 28.2,
 # openjdk@17, licenses accepted) — the vars below only pin versions and
 # pre-install extras on top, mirroring the AdGuard build-agent-images recipe.
@@ -99,13 +99,13 @@ variable "python_version" {
 variable "rust_version" {
   type        = string
   default     = ""
-  description = "Rust toolchain to install via rustup, e.g. \"1.95\"; also adds the aarch64/x86_64 macOS + iOS targets. Empty = skip."
+  description = "Rust toolchain to install via rustup, e.g. \"1.99\"; also adds the aarch64/x86_64 macOS + iOS targets. Empty = skip."
 }
 
 variable "java_version" {
   type        = string
   default     = ""
-  description = "SDKMAN Java version to install and set as the default, e.g. \"17.0.11-oracle\". Empty = skip."
+  description = "SDKMAN Java version to install and set as the default, e.g. \"17.0.12-oracle\". Empty = skip."
 }
 
 variable "flutter_version" {

@@ -11,7 +11,7 @@ const ENV = {
 describe('resolveRunOptions', () => {
   it('falls back to the platform defaults when nothing is set', () => {
     const options = resolveRunOptions('macos', {}, ENV, '/Users/test');
-    expect(options.image).toBe('sandbox-macos-tahoe');
+    expect(options.image).toBe('sandbox-macos-golden-gate');
     expect(options.instance).toBe(DEFAULT);
     expect(options.workDir).toBe('/Volumes/dev');
     expect(options.mountName).toBe('dev');
